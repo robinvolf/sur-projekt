@@ -1,5 +1,8 @@
 # Klasifikátor osoby pomocí zvuku
 
+### Poznámky k datasetu
+- Všechny vzory mají 1 kanál, vzorkovaný frekvencí 16kHz se vzorky, které mají 16bitové Inty
+
 ### Poznámky k funkcionalitě
 1. Rozsekáme si příchozí signál na kratičké kousky, několik milisekund
 2. Proženeme signál (teď už jen ten kousek) Hammingovým oknem

@@ -1,0 +1,11 @@
+[package]
+name = "sound"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.37", features = ["derive"] }
+hound = "3.5.1"
+ndarray = "0.16.1"
+plotters = {version = "0.3.7", default-features = false, features = ["svg_backend", "line_series", "point_series"]}
