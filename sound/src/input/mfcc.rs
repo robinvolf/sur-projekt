@@ -59,9 +59,8 @@ pub fn samples_into_window_matrix(
 
 /// Získá Mel-frequancy kepstral koeficienty pro zadané vzorky `samples`.
 /// TODO: Jak to funguje
-pub fn mfcc<T>(samples: &[T], samples_per_window: usize, window_overlap: usize) -> Array2<f32>
+pub fn mfcc(samples: &[f32], samples_per_window: usize, window_overlap: usize) -> Array2<f32>
 where
-    T: Into<f32> + Copy,
 {
     // Vneseme do vzorku Gaussovský šum kolem nuly, abychom se vyhli numerickým problémům při logaritmování
     let noise = Normal::new(0.0, 1.0)
@@ -72,7 +71,7 @@ where
     let samples: Vec<f32> = samples
         .iter()
         .zip(noise)
-        .map(|(sample, noise)| Into::<f32>::into(*sample) + noise)
+        .map(|(sample, noise)| *sample + noise)
         .collect();
 
     // Rozdělíme vzorky na okna
@@ -89,7 +88,7 @@ where
 /// ale prostřední část signálu, nechává nedotčenou.
 fn apply_tukey_window(mut windows: ArrayViewMut2<f32>) {
     // Převzato z https://en.wikipedia.org/wiki/Window_function#Examples_of_window_functions
-    const ALPHA: f32 = 0.5;
+    const ALPHA: f32 = 0.2;
     const TWO_PI: f32 = 2.0 * PI;
 
     let window_len = windows.dim().1;
@@ -106,6 +105,50 @@ fn apply_tukey_window(mut windows: ArrayViewMut2<f32>) {
 
     // tukey_window udělá broadcast a prvek po prvku se vynásobí se vzorky v každém okně
     windows *= &tukey_window;
+}
+
+/// Vykreslí graf série `series` do souboru `output`, pokud se něco pokazí
+/// vrátí Error.
+use anyhow::{Result, anyhow};
+use plotters::prelude::*;
+use std::path::Path;
+fn plot_series(series: &[f32], output: &Path) -> Result<()> {
+    let drawing_area = SVGBackend::new(output, (1920, 1080)).into_drawing_area();
+    drawing_area.fill(&WHITE).unwrap();
+
+    let mut chart_builder = ChartBuilder::on(&drawing_area);
+    chart_builder
+        .margin(20)
+        .set_left_and_bottom_label_area_size(20);
+
+    let data_min = series
+        .iter()
+        .map(|e| *e)
+        .reduce(|acc, e| acc.min(e))
+        .unwrap();
+    let data_max = series
+        .iter()
+        .map(|e| *e)
+        .reduce(|acc, e| acc.max(e))
+        .unwrap();
+
+    let mut chart_context = chart_builder
+        .build_cartesian_2d(0..series.len(), data_min..data_max)
+        .unwrap();
+
+    chart_context.configure_mesh().draw().unwrap();
+
+    chart_context
+        .draw_series(LineSeries::new(
+            series
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index, *value)),
+            &BLUE,
+        ))
+        .unwrap();
+
+    drawing_area.present().map_err(|err| anyhow!(err))
 }
 
 #[cfg(test)]
