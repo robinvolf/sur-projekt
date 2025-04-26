@@ -56,7 +56,7 @@ fn plot_series(series: &[i16], output: &Path) -> Result<()> {
 fn main() -> Result<()> {
     let config = Config::parse();
 
-    let matrix = input::load_wav_file_16bit(&config.wav_path, 50)?;
+    let matrix = input::wav_to_mfcc(&config.wav_path)?;
 
     println!("{:?}", matrix);
 

@@ -10,6 +10,10 @@ mod mfcc;
 
 use mfcc::{samples_in_window, samples_into_window_matrix};
 
+pub fn wav_to_mfcc(path: &Path) -> Result<Array2<i16>> {
+    todo!()
+}
+
 /// Načte wav soubor `path` ve formátu 16bit a vytvoří matici oken přes tento soubor,
 /// kde každé okno bude `window_size_ms` dlouhé. Pokud je problém z načítáním,
 /// vrátí Error.
@@ -26,7 +30,11 @@ use mfcc::{samples_in_window, samples_into_window_matrix};
 /// [ ... ]
 /// [ ... ]
 /// ```
-pub fn load_wav_file_16bit(path: &Path, window_size_ms: u32) -> Result<Array2<i16>> {
+fn load_wav_file_16bit(
+    path: &Path,
+    window_size_ms: u32,
+    windows_overlap: u32,
+) -> Result<Array2<i16>> {
     let mut reader =
         WavReader::open(path).context(format!("Nelze otevřít wav soubor {}", path.display()))?;
 
@@ -39,10 +47,8 @@ pub fn load_wav_file_16bit(path: &Path, window_size_ms: u32) -> Result<Array2<i1
         .map(|s| s.expect("Vzorky souboru by měly být ve formátu i16"))
         .collect();
 
-    let matrix = samples_into_window_matrix(
-        samples,
-        samples_in_window(reader.spec().sample_rate as f32, window_size_ms),
-    );
+    let samples_per_window = samples_in_window(reader.spec().sample_rate as f32, window_size_ms);
+    let matrix = samples_into_window_matrix(&samples, samples_per_window, windows_overlap as usize);
 
     Ok(matrix)
 }
