@@ -48,7 +48,6 @@ fn load_wav_file_16bit(
         .collect();
 
     let samples_per_window = samples_in_window(reader.spec().sample_rate as f32, window_size_ms);
-    let matrix = samples_into_window_matrix(&samples, samples_per_window, windows_overlap as usize);
 
-    Ok(matrix)
+    todo!()
 }

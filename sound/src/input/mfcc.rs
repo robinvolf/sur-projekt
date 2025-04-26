@@ -1,6 +1,9 @@
 //! Modul pro zpracování audia pomocí MFCC.
 
-use ndarray::{Array2, ArrayView1};
+use std::f32::consts::PI;
+
+use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut2};
+use rand_distr::{Distribution, Normal, StandardNormal, Uniform};
 
 /// Vrátí počet vzorků v okně, pokud vzorkujeme na frekvenci `frequency`.
 pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
@@ -28,10 +31,10 @@ pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
 /// [ ... ]
 /// ```
 pub fn samples_into_window_matrix(
-    samples: &[i16],
+    samples: &[f32],
     samples_per_window: usize,
     overlap: usize,
-) -> Array2<i16> {
+) -> Array2<f32> {
     // Výpočet dimenzí matice oken
     let samples_in_window = samples_per_window;
 
@@ -54,17 +57,61 @@ pub fn samples_into_window_matrix(
     matrix
 }
 
-pub fn mfcc(samples: &[i16], samples_per_window: usize, window_overlap: usize) -> Array2<i16> {
-    // TODO: Vnést šum do vzorků?
+/// Získá Mel-frequancy kepstral koeficienty pro zadané vzorky `samples`.
+/// TODO: Jak to funguje
+pub fn mfcc<T>(samples: &[T], samples_per_window: usize, window_overlap: usize) -> Array2<f32>
+where
+    T: Into<f32> + Copy,
+{
+    // Vneseme do vzorku Gaussovský šum kolem nuly, abychom se vyhli numerickým problémům při logaritmování
+    let noise = Normal::new(0.0, 1.0)
+        .unwrap()
+        .sample_iter(rand::rng())
+        .take(samples.len());
+
+    let samples: Vec<f32> = samples
+        .iter()
+        .zip(noise)
+        .map(|(sample, noise)| Into::<f32>::into(*sample) + noise)
+        .collect();
 
     // Rozdělíme vzorky na okna
-    let windows_matrix = samples_into_window_matrix(samples, samples_per_window, window_overlap);
+    let mut windows_matrix =
+        samples_into_window_matrix(&samples, samples_per_window, window_overlap);
+
+    // Aplikujeme Tukeyho okno na všechny vzorky
+    apply_tukey_window(windows_matrix.view_mut());
 
     todo!()
 }
 
+/// Aplikuje Tukeyho okno na matici vzorků. Toto okno utlumuje na začátku a na konci,
+/// ale prostřední část signálu, nechává nedotčenou.
+fn apply_tukey_window(mut windows: ArrayViewMut2<f32>) {
+    // Převzato z https://en.wikipedia.org/wiki/Window_function#Examples_of_window_functions
+    const ALPHA: f32 = 0.5;
+    const TWO_PI: f32 = 2.0 * PI;
+
+    let window_len = windows.dim().1;
+
+    let tukey_window = Array1::from_iter((0..windows.dim().1).into_iter().map(|i| {
+        if (i as f32) < ALPHA * window_len as f32 / 2.0
+            || (i as f32) > window_len as f32 * (2.0 - ALPHA) / 2.0
+        {
+            0.5 * (1.0 - f32::cos((TWO_PI * i as f32) / (ALPHA * window_len as f32)))
+        } else {
+            1.0
+        }
+    }));
+
+    // tukey_window udělá broadcast a prvek po prvku se vynásobí se vzorky v každém okně
+    windows *= &tukey_window;
+}
+
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use super::*;
 
     const TEST_WINDOWS_MS: u32 = 50;
@@ -88,35 +135,37 @@ mod tests {
     #[test]
     fn samples_into_window_matrix_test() {
         let samples = vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+            17.0, 18.0, 19.0, 20.0,
         ];
 
         let matrix = samples_into_window_matrix(&samples, 4, 0);
 
-        assert_eq!(matrix[[0, 0]], 1);
-        assert_eq!(matrix[[4, 3]], 20);
-        assert_eq!(matrix[[0, 3]], 4);
-        assert_eq!(matrix[[4, 0]], 17);
+        assert_eq!(matrix[[0, 0]], 1.0);
+        assert_eq!(matrix[[4, 3]], 20.0);
+        assert_eq!(matrix[[0, 3]], 4.0);
+        assert_eq!(matrix[[4, 0]], 17.0);
     }
 
     #[test]
     fn samples_into_window_matrix_truncation_test() {
         let samples = vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+            17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0,
         ];
 
         // Počet samples není dělitelný 4, ale jejich 23 -> tři vzorky by měly být zahozeny
         let matrix = samples_into_window_matrix(&samples, 4, 0);
 
-        assert_eq!(matrix[[0, 0]], 1);
-        assert_eq!(matrix[[4, 3]], 20);
-        assert_eq!(matrix[[0, 3]], 4);
-        assert_eq!(matrix[[4, 0]], 17);
+        assert_eq!(matrix[[0, 0]], 1.0);
+        assert_eq!(matrix[[4, 3]], 20.0);
+        assert_eq!(matrix[[0, 3]], 4.0);
+        assert_eq!(matrix[[4, 0]], 17.0);
     }
 
     #[test]
     fn samples_into_window_matrix_overlap_test() {
-        let samples = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let samples = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         // Overlap = 1, tudíž jednotlivé řádky budou
         // 1, 2, 3, 4
         // 3, 4, 5, 6,
@@ -124,18 +173,18 @@ mod tests {
         // 7, 8, 9, 10,
         let matrix = samples_into_window_matrix(&samples, 4, 2);
 
-        assert_eq!(matrix[[0, 0]], 1);
-        assert_eq!(matrix[[3, 3]], 10);
+        assert_eq!(matrix[[0, 0]], 1.0);
+        assert_eq!(matrix[[3, 3]], 10.0);
 
         assert_eq!(matrix[[0, 2]], matrix[[1, 0]]);
         assert_eq!(matrix[[0, 3]], matrix[[1, 1]]);
 
-        assert_eq!(matrix[[3, 3]], 10)
+        assert_eq!(matrix[[3, 3]], 10.0)
     }
 
     #[test]
     fn samples_into_window_matrix_overlap_truncation_test() {
-        let samples = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let samples = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
         // Overlap = 1, tudíž jednotlivé řádky budou
         // 1, 2, 3, 4
         // 3, 4, 5, 6,
@@ -147,12 +196,28 @@ mod tests {
         // ale protože končí data u 11ky, měla by se zahodit
         let matrix = samples_into_window_matrix(&samples, 4, 2);
 
-        assert_eq!(matrix[[0, 0]], 1);
-        assert_eq!(matrix[[3, 3]], 10);
+        assert_eq!(matrix[[0, 0]], 1.0);
+        assert_eq!(matrix[[3, 3]], 10.0);
 
         assert_eq!(matrix[[0, 2]], matrix[[1, 0]]);
         assert_eq!(matrix[[0, 3]], matrix[[1, 1]]);
 
-        assert_eq!(matrix[[3, 3]], 10)
+        assert_eq!(matrix[[3, 3]], 10.0)
+    }
+
+    #[test]
+    fn apply_tukey_window_test() {
+        // Matice s jediným řádkem se samými jedničkami
+        let mut windows = array![[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]];
+        apply_tukey_window(windows.view_mut());
+
+        let expected_windows = array![[0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 0.49999967]];
+
+        const TOLERANCE: f32 = 0.01;
+
+        // assert_eq!(windows, expected_windows) nefunguje, kvůli nepřesnosti floatů
+        for (got, expected) in windows.into_iter().zip(expected_windows.into_iter()) {
+            assert!((got - expected).abs() < TOLERANCE);
+        }
     }
 }
