@@ -3,10 +3,24 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut2, s};
 use ndrustfft::{DctHandler, R2cFftHandler, nddct2, ndfft_r2c};
 use rand_distr::{Distribution, Normal};
-use std::{cmp::max, f32::consts::PI};
+use std::{cmp::min, f32::consts::PI};
 
 const MEL_FILTER_START_FREQ: usize = 20;
 const MEL_FILTER_END_FREQ: usize = 8000;
+
+pub struct MFCCSettings {
+    /// Velikost okna v ms
+    pub window_size_ms: u32, // = 100;
+
+    /// Počet vzorků, o které se budou okna překrývat
+    pub windows_overlap: usize, // = 400;
+
+    /// Počet Mel-filter bank, které budou aplikovány na signál
+    pub num_mel_filter_banks: usize, // = 100;
+
+    /// Maximální počet koeficientů
+    pub atmost_coeffs: usize,
+}
 
 /// Vrátí počet vzorků v okně, pokud vzorkujeme na frekvenci `frequency`.
 pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
@@ -77,16 +91,11 @@ pub fn samples_into_window_matrix(
 /// 6. Zlogaritmujeme
 /// 7. Spočteme kosinovou transformaci
 /// 8. Vybereme nejvýše `atmost_coeffs` koeficientů pro každé okno
-pub fn mfcc(
-    samples: &[f32],
-    sampling_freq: usize,
-    window_overlap: usize,
-    samples_in_window: usize,
-    mel_filter_banks: usize,
-    atmost_coeffs: usize,
-) -> Array2<f32>
+pub fn mfcc(samples: &[f32], sampling_frequency: usize, settings: &MFCCSettings) -> Array2<f32>
 where
 {
+    let samples_in_window = samples_in_window(sampling_frequency as f32, settings.window_size_ms);
+
     // Vneseme do vzorku Gaussovský šum kolem nuly, abychom se vyhli numerickým problémům při logaritmování
     let noise = Normal::new(0.0, 1.0)
         .unwrap()
@@ -101,7 +110,7 @@ where
 
     // Rozdělíme vzorky na okna
     let mut windows_matrix =
-        samples_into_window_matrix(&samples, samples_in_window, window_overlap);
+        samples_into_window_matrix(&samples, samples_in_window, settings.windows_overlap);
 
     // Aplikujeme Tukeyho okno na všechny vzorky
     apply_tukey_window(windows_matrix.view_mut());
@@ -114,8 +123,8 @@ where
         &windows_fft,
         MEL_FILTER_START_FREQ,
         MEL_FILTER_END_FREQ,
-        mel_filter_banks,
-        sampling_freq,
+        settings.num_mel_filter_banks,
+        sampling_frequency,
     );
 
     // Zlogaritmování
@@ -128,7 +137,10 @@ where
 
     let num_of_mfcc_coeffs_per_window = mfcc_coeffs.dim().1;
 
-    mfcc_coeffs.slice_move(s![.., 0..max(num_of_mfcc_coeffs_per_window, atmost_coeffs)])
+    mfcc_coeffs.slice_move(s![
+        ..,
+        0..min(num_of_mfcc_coeffs_per_window, settings.atmost_coeffs)
+    ])
 }
 
 /// Zkonvertuje frekvenci `x` do Mel-scale
