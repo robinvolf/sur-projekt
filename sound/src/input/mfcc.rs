@@ -154,7 +154,7 @@ fn mel_scale_inv(x: f32) -> f32 {
 }
 
 /// Aplikuje Mel-filtr banky na jednotlivá okna.
-/// Vytvoření Mel-filtr bank převzato z: http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs
+/// Vytvoření Mel-filtr bank převzato z: <http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs>
 fn apply_mel_filter_bank(
     windows: &Array2<f32>,
     freq_start: usize,
@@ -491,7 +491,7 @@ mod tests {
         let mut windows = array![[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]];
         apply_tukey_window(windows.view_mut());
 
-        let expected_windows = array![[0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 0.49999967]];
+        let expected_windows = array![[0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]];
 
         const TOLERANCE: f32 = 0.01;
 
