@@ -1,9 +1,12 @@
 //! Modul pro zpracování audia pomocí MFCC.
 
-use std::f32::consts::PI;
+use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut2, s};
+use ndrustfft::{DctHandler, R2cFftHandler, nddct2, ndfft_r2c};
+use rand_distr::{Distribution, Normal};
+use std::{cmp::max, f32::consts::PI};
 
-use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut2};
-use rand_distr::{Distribution, Normal, StandardNormal, Uniform};
+const MEL_FILTER_START_FREQ: usize = 20;
+const MEL_FILTER_END_FREQ: usize = 8000;
 
 /// Vrátí počet vzorků v okně, pokud vzorkujeme na frekvenci `frequency`.
 pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
@@ -57,9 +60,31 @@ pub fn samples_into_window_matrix(
     matrix
 }
 
-/// Získá Mel-frequancy kepstral koeficienty pro zadané vzorky `samples`.
-/// TODO: Jak to funguje
-pub fn mfcc(samples: &[f32], samples_per_window: usize, window_overlap: usize) -> Array2<f32>
+/// Získá Mel-frequancy kepstral koeficienty pro zadané vzorky `samples`, kde:
+///   - `sampling_freq` je vzorkovací frekvence se kterou byly vzorky pořízeny
+///   - `window_overlap` je počet vzorků, o které se jednotlivá okna signálu budou překrývat
+///   - `samples_in_window` je počet vzorků, který bude každé okno obsahovat
+///   - `mel_filter_banks` je počet bank filtrů, které se na signál aplikují (čím víc, tím větší dimenzionalita výstupních MFCC koeficientů jednotlivých oken).
+///
+/// ### Jak to funguje?
+/// Výpočet MFCC koeficientů obnáší tyto kroky:
+/// 1. Zanesení slabého gaussovského šumu do signálu, abychom se vyhli pozdějším možným numerickým komplikacím
+/// 2. Rozdělíme signál na překrývající se okna
+///   - Když počet oken nesedí přesně na počet vzorků v signálu, signál se ořeže
+/// 3. Aplikujeme Tukeyho okno na okna signálu, abychom je na začátku a na konci utlumili do nuly
+/// 4. Spočteme FFT oken signálu a ponecháme si pouze amplitudovou složku
+/// 5. Aplikujeme banku Mel-filtrů na amplitudy oken
+/// 6. Zlogaritmujeme
+/// 7. Spočteme kosinovou transformaci
+/// 8. Vybereme nejvýše `atmost_coeffs` koeficientů pro každé okno
+pub fn mfcc(
+    samples: &[f32],
+    sampling_freq: usize,
+    window_overlap: usize,
+    samples_in_window: usize,
+    mel_filter_banks: usize,
+    atmost_coeffs: usize,
+) -> Array2<f32>
 where
 {
     // Vneseme do vzorku Gaussovský šum kolem nuly, abychom se vyhli numerickým problémům při logaritmování
@@ -76,11 +101,128 @@ where
 
     // Rozdělíme vzorky na okna
     let mut windows_matrix =
-        samples_into_window_matrix(&samples, samples_per_window, window_overlap);
+        samples_into_window_matrix(&samples, samples_in_window, window_overlap);
 
     // Aplikujeme Tukeyho okno na všechny vzorky
     apply_tukey_window(windows_matrix.view_mut());
 
+    // Aplikujeme FFT a ponecháme si pouze amplitudy
+    let windows_fft = fft_only_amplitudes(&windows_matrix);
+
+    // Aplikujeme mel-banku filtrů
+    let mel_coefs = apply_mel_filter_bank(
+        &windows_fft,
+        MEL_FILTER_START_FREQ,
+        MEL_FILTER_END_FREQ,
+        mel_filter_banks,
+        sampling_freq,
+    );
+
+    // Zlogaritmování
+    let log_mel_coefs = mel_coefs.ln();
+
+    // Diskrétní kosinová transformace pro jednotlivé řádky
+    let dct_handler = DctHandler::<f32>::new(log_mel_coefs.shape()[1]);
+    let mut mfcc_coeffs = Array2::zeros(log_mel_coefs.dim());
+    nddct2(&log_mel_coefs, &mut mfcc_coeffs, &dct_handler, 1);
+
+    let num_of_mfcc_coeffs_per_window = mfcc_coeffs.dim().1;
+
+    mfcc_coeffs.slice_move(s![.., 0..max(num_of_mfcc_coeffs_per_window, atmost_coeffs)])
+}
+
+/// Zkonvertuje frekvenci `x` do Mel-scale
+fn mel_scale(x: f32) -> f32 {
+    1125.0 * (1.0 + x / 700.0).ln()
+}
+
+/// Zkonvertuje číslo `x` v Mel-scale na frekvenci
+fn mel_scale_inv(x: f32) -> f32 {
+    700.0 * ((x / 1125.0).exp() - 1.0)
+}
+
+/// Aplikuje Mel-filtr banky na jednotlivá okna.
+/// Vytvoření Mel-filtr bank převzato z: http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs
+fn apply_mel_filter_bank(
+    windows: &Array2<f32>,
+    freq_start: usize,
+    freq_end: usize,
+    num_banks: usize,
+    samples_rate: usize,
+) -> Array2<f32> {
+    let mel_start = mel_scale(freq_start as f32);
+    let mel_end = mel_scale(freq_end as f32);
+    let window_len = windows.dim().1;
+
+    let mut filter_bank_points = Array1::linspace(mel_start, mel_end, num_banks + 2); // +2 protože ještě musíme započítat začátek a konec
+
+    // Převedem zpátky do domény frekvencí, nyní jsou frekvence nelineárně rozmístěny
+    filter_bank_points.map_inplace(|x| *x = mel_scale_inv(*x));
+
+    // Převod na FFT bins
+    filter_bank_points
+        .map_inplace(|x| *x = ((2 * window_len + 1) as f32 * *x / samples_rate as f32).floor());
+
+    let banks = Array2::from_shape_fn((num_banks, window_len), |(m, k)| {
+        let m = m + 1; // M-kem se jen indexuju do filter_bank_points, které jsou o jeden prvek na každou stranu větší, než výsledná banka filtrů
+        let k = k as f32;
+
+        if k < filter_bank_points[m - 1] || k > filter_bank_points[m + 1] {
+            0.0
+        } else if k >= filter_bank_points[m - 1] && k <= filter_bank_points[m] {
+            (k - filter_bank_points[m - 1]) / (filter_bank_points[m] - filter_bank_points[m - 1])
+        } else {
+            (filter_bank_points[m + 1] - k) / (filter_bank_points[m + 1] - filter_bank_points[m])
+        }
+    });
+
+    // Aplikuju filtry na jednotlivá a sečtu aplikace filtru na okno
+    let applied_mel_filters = Array2::from_shape_fn(
+        (windows.shape()[0], num_banks),
+        |(window_index, bank_index)| {
+            let filtered_window = &windows.row(window_index) * &banks.row(bank_index);
+            filtered_window.sum()
+        },
+    );
+
+    applied_mel_filters
+}
+
+/// Aplikuje FFT na jednotlivá okna (řádky matice).
+/// Výstupní matice bude mít stejný počet oken, ale budou menší
+/// (konkrétně n/2 + 1), kvůli symetrii FFT při zpracování reálného signálu.
+fn fft_only_amplitudes(windows: &Array2<f32>) -> Array2<f32> {
+    let window_len = windows.dim().1;
+    let fft_handler = R2cFftHandler::<f32>::new(window_len);
+
+    let mut fft_complex = Array2::zeros((windows.dim().0, window_len / 2 + 1));
+
+    // FFT přes jednotlivá okna, výstup jsou komplexní čísla
+    // Jelikož je signál diskrétní, nová okna budou mít poloviční velikost (kvůli symetrii)
+    ndfft_r2c(windows, &mut fft_complex, &fft_handler, 1);
+
+    // Matice, kde řádky jsou reálná čísla reprezentující amplitudy z FFT
+    let fft_only_amplitude = Array2::from_shape_fn(fft_complex.dim(), |(i, j)| {
+        let complex = fft_complex[[i, j]];
+        (complex.re.powi(2) + complex.im.powi(2)).sqrt()
+    });
+
+    fft_only_amplitude
+}
+
+/// Vrátí kolika nulami by mělo být doplněna okno tak, aby FFT byla co nejrychlejší.
+/// Nejrychlejší je FFT, pokud počítá na bufferu velikosti 2^n * 3 ^m.
+/// Tato funkce prozkoumá všechny
+fn get_padding_for_fft(_window_len: usize) -> usize {
+    // let smallest_optimal = window_len;
+
+    // for two_power in (0..=20) {
+    //     for three_power in (0..=20) {
+    //         let len = 2.powi(two_power) * 2.powi(three_power);
+    //     }
+    // }
+
+    // 54
     todo!()
 }
 
@@ -107,48 +249,131 @@ fn apply_tukey_window(mut windows: ArrayViewMut2<f32>) {
     windows *= &tukey_window;
 }
 
-/// Vykreslí graf série `series` do souboru `output`, pokud se něco pokazí
-/// vrátí Error.
-use anyhow::{Result, anyhow};
-use plotters::prelude::*;
-use std::path::Path;
-fn plot_series(series: &[f32], output: &Path) -> Result<()> {
-    let drawing_area = SVGBackend::new(output, (1920, 1080)).into_drawing_area();
-    drawing_area.fill(&WHITE).unwrap();
+#[cfg(debug_assertions)]
+mod plots {
+    use anyhow::{Result, anyhow};
+    use ndarray::Array2;
+    use plotters::prelude::*;
+    use std::path::Path;
 
-    let mut chart_builder = ChartBuilder::on(&drawing_area);
-    chart_builder
-        .margin(20)
-        .set_left_and_bottom_label_area_size(20);
+    /// Vykreslí graf série `series` do souboru `output`, pokud se něco pokazí
+    /// vrátí Error.
+    pub fn plot_series(series: &[f32], output: &Path) -> Result<()> {
+        let drawing_area = SVGBackend::new(output, (1920, 1080)).into_drawing_area();
+        drawing_area.fill(&WHITE).unwrap();
 
-    let data_min = series
-        .iter()
-        .map(|e| *e)
-        .reduce(|acc, e| acc.min(e))
-        .unwrap();
-    let data_max = series
-        .iter()
-        .map(|e| *e)
-        .reduce(|acc, e| acc.max(e))
-        .unwrap();
+        let mut chart_builder = ChartBuilder::on(&drawing_area);
+        chart_builder
+            .margin(20)
+            .set_left_and_bottom_label_area_size(20);
 
-    let mut chart_context = chart_builder
-        .build_cartesian_2d(0..series.len(), data_min..data_max)
-        .unwrap();
+        let data_min = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.min(e))
+            .unwrap();
+        let data_max = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.max(e))
+            .unwrap();
 
-    chart_context.configure_mesh().draw().unwrap();
+        let mut chart_context = chart_builder
+            .build_cartesian_2d(0..series.len(), data_min..data_max)
+            .unwrap();
 
-    chart_context
-        .draw_series(LineSeries::new(
-            series
-                .iter()
-                .enumerate()
-                .map(|(index, value)| (index, *value)),
-            &BLUE,
-        ))
-        .unwrap();
+        chart_context.configure_mesh().draw().unwrap();
 
-    drawing_area.present().map_err(|err| anyhow!(err))
+        chart_context
+            .draw_series(LineSeries::new(
+                series
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| (index, *value)),
+                &BLUE,
+            ))
+            .unwrap();
+
+        drawing_area.present().map_err(|err| anyhow!(err))
+    }
+
+    /// Vykreslí plot, kde `series` interpretuje jako Fourierovu transformaci
+    pub fn plot_fft(series: &[f32], sampling_freq: usize, output: &Path) -> Result<()> {
+        let drawing_area = SVGBackend::new(output, (1920, 1080)).into_drawing_area();
+        drawing_area.fill(&WHITE).unwrap();
+
+        let mut chart_builder = ChartBuilder::on(&drawing_area);
+        chart_builder
+            .margin(20)
+            .set_left_and_bottom_label_area_size(20);
+
+        let data_min = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.min(e))
+            .unwrap();
+        let data_max = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.max(e))
+            .unwrap();
+
+        let mut chart_context = chart_builder
+            .build_cartesian_2d(0..sampling_freq / 2 + 1, data_min..data_max)
+            .unwrap();
+
+        chart_context.configure_mesh().draw().unwrap();
+
+        chart_context
+            .draw_series(LineSeries::new(
+                series
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| (index * sampling_freq / series.len(), *value)),
+                &BLUE,
+            ))
+            .unwrap();
+
+        drawing_area.present().map_err(|err| anyhow!(err))
+    }
+
+    pub fn plot_series_multiple(series: &Array2<f32>, output: &Path) -> Result<()> {
+        let drawing_area = SVGBackend::new(output, (1920, 1080)).into_drawing_area();
+        drawing_area.fill(&WHITE).unwrap();
+
+        let mut chart_builder = ChartBuilder::on(&drawing_area);
+        chart_builder
+            .margin(20)
+            .set_left_and_bottom_label_area_size(20);
+
+        let data_min = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.min(e))
+            .unwrap();
+        let data_max = series
+            .iter()
+            .map(|e| *e)
+            .reduce(|acc, e| acc.max(e))
+            .unwrap();
+
+        let mut chart_context = chart_builder
+            .build_cartesian_2d(0..series.dim().1, data_min..data_max)
+            .unwrap();
+
+        chart_context.configure_mesh().draw().unwrap();
+
+        for row in series.rows() {
+            chart_context
+                .draw_series(LineSeries::new(
+                    row.iter().enumerate().map(|(index, value)| (index, *value)),
+                    &RED,
+                ))
+                .unwrap();
+        }
+
+        drawing_area.present().map_err(|err| anyhow!(err))
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clap::Parser;
-use plotters::prelude::*;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 mod input;
 
@@ -14,7 +13,9 @@ struct Config {
 fn main() -> Result<()> {
     let config = Config::parse();
 
-    input::wav_to_mfcc(&config.wav_path);
+    let mfcc = input::wav_to_mfcc(&config.wav_path)?;
+
+    println!("{}", mfcc);
 
     Ok(())
 }

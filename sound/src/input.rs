@@ -15,6 +15,12 @@ const WINDOW_SIZE_MS: u32 = 100;
 /// Počet vzorků, o které se budou okna překrývat
 const WINDOWS_OVERLAP: usize = 400;
 
+/// Počet Mel-filter bank, které budou aplikovány na signál
+const NUM_MEL_FILTER_BANKS: usize = 100;
+
+/// Maximální počet MFCC koeficientů, které budou vybrány
+const MAX_MFCC_COEFFS: usize = 20;
+
 pub fn wav_to_mfcc(path: &Path) -> Result<Array2<f32>> {
     let mut reader =
         WavReader::open(path).context(format!("Nelze otevřít wav soubor {}", path.display()))?;
@@ -31,5 +37,12 @@ pub fn wav_to_mfcc(path: &Path) -> Result<Array2<f32>> {
     let samples_per_window =
         mfcc::samples_in_window(reader.spec().sample_rate as f32, WINDOW_SIZE_MS);
 
-    Ok(mfcc(&samples, samples_per_window, WINDOWS_OVERLAP))
+    Ok(mfcc(
+        &samples,
+        reader.spec().sample_rate as usize,
+        WINDOWS_OVERLAP,
+        samples_per_window,
+        NUM_MEL_FILTER_BANKS,
+        MAX_MFCC_COEFFS,
+    ))
 }
