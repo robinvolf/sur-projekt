@@ -62,6 +62,8 @@ struct Gmm {
 }
 
 impl Gmm {
+    const MAX_TRAINING_ITERS: usize = 10;
+
     /// Vytvoří nový GMM model z natrénovaných dat `training_data`,
     /// který modeluje data pomocí `num_gaussians` gaussovek.
     ///
@@ -84,10 +86,8 @@ impl Gmm {
             covariance_matrix.mapv_inplace(|x| x + 0.001 * rng.sample::<f32, _>(StandardNormal));
         }
 
-        let should_terminate = false;
-        while !should_terminate {
+        for _ in (0..Gmm::MAX_TRAINING_ITERS) {
             // Expectation
-
             let responsibilities = gmm.calculate_responsibilities(training_data);
 
             debug_assert_eq!(
@@ -97,11 +97,22 @@ impl Gmm {
             );
 
             // Maximization
+            gmm.update_params(responsibilities.view(), training_data);
         }
 
-        todo!()
+        Ok(gmm)
     }
 
+    /// Spočítá pro model "responsibilities" - tj. jak moc jsou jednotlivé gaussovky
+    /// zodpovědné za vysvětlení výskytu každého data.
+    ///
+    /// Matice je ve tvaru: (C = počet gaussovek, D = počet dat)
+    /// ```
+    ///    C
+    /// [ ... ]
+    /// [ ... ] D
+    /// [ ... ]
+    /// ```
     fn calculate_responsibilities(&self, training_data: ArrayView2<f32>) -> Array2<f32> {
         // Pro každé dato a gaussovku spočítám pravděpodobnost, že daná gaussovka vygenerovala dané dato a zváhuju to pravděopdobností, výběru dané gaussovky
         let mut weighted_probs_from_gaussians = Array2::zeros((0, self.gaussians.len()));
@@ -126,22 +137,31 @@ impl Gmm {
         let gauss_responsibilities = responsibilities.sum_axis(Axis(0));
 
         // Spočítáme nové pravděpodobnosti jednotlivých gaussovek
-        let new_gauss_probs = gauss_responsibilities / responsibilities.sum();
+        let new_gauss_probs = gauss_responsibilities / responsibilities.dim().0 as f32;
+        for (gaussian, new_prob) in self.gaussians.iter_mut().zip(new_gauss_probs) {
+            gaussian.prob = new_prob;
+        }
 
-        // Spočítáme nové střední hodnoty a kovarianční matice
-        // let weighted_data = &training_data
-        //     .t()
-        //     .broadcast((dimensionality, training_data_len, num_gaussians))
-        //     .expect("Nelze rozšířit trénovací data")
-        //     * &responsibilities
-        //         .broadcast((dimensionality, training_data_len, num_gaussians))
-        //         .expect("Nelze rozšířit responsibilities");
-        // let new_means = weighted_data.sum_axis(Axis(1))
-        //     / new_gauss_probs
-        //         .broadcast((dimensionality, num_gaussians))
-        //         .unwrap();
+        for (
+            GmmGaussian {
+                prob: new_prob,
+                mean,
+                covariance_matrix,
+            },
+            responsibilities,
+        ) in self.gaussians.iter_mut().zip(responsibilities.columns())
+        {
+            let new_mean = (&training_data * &responsibilities).sum_axis(Axis(0)) / *new_prob;
+            mean.assign(&new_mean);
 
-        // let new_covs = todo!();
+            let new_cov = ((&training_data - &new_mean)
+                .t()
+                .dot(&(&training_data - &new_mean))
+                * &responsibilities)
+                .sum_axis(Axis(0))
+                / *new_prob;
+            covariance_matrix.assign(&new_cov);
+        }
     }
 
     /// Inicializuje GMM tak, že každé gaussovce přiřadí stejný průměr
