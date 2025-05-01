@@ -86,15 +86,9 @@ impl Gmm {
             covariance_matrix.mapv_inplace(|x| x + 0.001 * rng.sample::<f32, _>(StandardNormal));
         }
 
-        for _ in (0..Gmm::MAX_TRAINING_ITERS) {
+        for _ in 0..Gmm::MAX_TRAINING_ITERS {
             // Expectation
             let responsibilities = gmm.calculate_responsibilities(training_data);
-
-            debug_assert_eq!(
-                responsibilities.sum_axis(Axis(1)),
-                Array1::from_elem(responsibilities.dim().0, 1.0),
-                "Suma přes pravděpodobnosti pro každé dato by měla být 1.0"
-            );
 
             // Maximization
             gmm.update_params(responsibilities.view(), training_data);
@@ -114,19 +108,27 @@ impl Gmm {
     /// [ ... ]
     /// ```
     fn calculate_responsibilities(&self, training_data: ArrayView2<f32>) -> Array2<f32> {
+        let data_len = training_data.dim().0;
+
         // Pro každé dato a gaussovku spočítám pravděpodobnost, že daná gaussovka vygenerovala dané dato a zváhuju to pravděopdobností, výběru dané gaussovky
-        let mut weighted_probs_from_gaussians = Array2::zeros((0, self.gaussians.len()));
-        for gaussian in self.gaussians.iter() {
+        let mut weighted_probs_from_gaussians = Array2::zeros((data_len, self.gaussians.len()));
+        for (gaussian, mut column) in self
+            .gaussians
+            .iter()
+            .zip(weighted_probs_from_gaussians.columns_mut())
+        {
             let probabilites_from_gaussian = gaussian.get_prob(training_data);
-            weighted_probs_from_gaussians
-                .push_row(probabilites_from_gaussian.view())
-                .unwrap();
+            column.assign(&probabilites_from_gaussian);
         }
 
         let resp_denom = weighted_probs_from_gaussians.sum_axis(Axis(1));
 
+        for mut column in weighted_probs_from_gaussians.columns_mut() {
+            column /= &resp_denom;
+        }
+
         // Pro každé dato to říká, jak moc jsou jednotlivé gaussovky za to dato zodpovědné
-        let responsibilities = weighted_probs_from_gaussians / &resp_denom.t(); // Musíme transponovat, v responsibilities jsou data po řádcích a gaussovky po sloupcích
+        let responsibilities = weighted_probs_from_gaussians;
 
         responsibilities
     }
@@ -135,6 +137,8 @@ impl Gmm {
     fn update_params(&mut self, responsibilities: ArrayView2<f32>, training_data: ArrayView2<f32>) {
         // Váhy jednotlivých gaussovek, když vezmeme v úvahu všechna data (kolik proporčně dat náleží každé z gaussovek)
         let gauss_responsibilities = responsibilities.sum_axis(Axis(0));
+
+        let data_len = training_data.dim().0;
 
         // Spočítáme nové pravděpodobnosti jednotlivých gaussovek
         let new_gauss_probs = gauss_responsibilities / responsibilities.dim().0 as f32;
@@ -151,15 +155,33 @@ impl Gmm {
             responsibilities,
         ) in self.gaussians.iter_mut().zip(responsibilities.columns())
         {
-            let new_mean = (&training_data * &responsibilities).sum_axis(Axis(0)) / *new_prob;
+            let responsibilities_data_shape = responsibilities
+                .broadcast((self.dimensionality, data_len))
+                .unwrap()
+                .t()
+                .to_owned();
+
+            let new_mean =
+                (&training_data * &responsibilities_data_shape).sum_axis(Axis(0)) / *new_prob;
             mean.assign(&new_mean);
 
-            let new_cov = ((&training_data - &new_mean)
-                .t()
-                .dot(&(&training_data - &new_mean))
-                * &responsibilities)
-                .sum_axis(Axis(0))
-                / *new_prob;
+            let mut new_cov = Array2::zeros((self.dimensionality, self.dimensionality));
+            for (features, responsibility) in training_data
+                .rows()
+                .into_iter()
+                .zip(responsibilities.iter())
+            {
+                let left = (&features - &new_mean)
+                    .broadcast((self.dimensionality, self.dimensionality))
+                    .unwrap()
+                    .t()
+                    .to_owned();
+                let right = (&features - &new_mean)
+                    .broadcast((self.dimensionality, self.dimensionality))
+                    .unwrap()
+                    .to_owned();
+                new_cov += &(*responsibility * left * right);
+            }
             covariance_matrix.assign(&new_cov);
         }
     }
@@ -204,6 +226,7 @@ impl Gmm {
 #[cfg(test)]
 mod tests {
     use ndarray::array;
+    use ndarray_linalg::assert_aclose;
 
     use super::*;
 
@@ -216,8 +239,54 @@ mod tests {
 
         assert_eq!(gmm.gaussians.len(), 2);
         for gaussian in gmm.gaussians {
+            assert_eq!(gaussian.prob, 0.5);
             assert_eq!(gaussian.mean, array![2.0, 2.0]);
             assert_eq!(gaussian.covariance_matrix, array![[1.0, 1.0], [1.0, 1.0]]);
+        }
+    }
+
+    #[test]
+    fn train_test() {
+        let training_data = include!("gmm_test_data.rs");
+
+        let gmm = Gmm::train(training_data.view(), 3).unwrap();
+        let prob = 1.0 / 0.3; // Všechny gussovky by měly mít stejný počet hodnot
+        let limit = 1.0;
+
+        let expected_gaussians = vec![
+            GmmGaussian {
+                prob: 1.0 / 3.0,
+                mean: array![50.0, 40.0],
+                covariance_matrix: array![[100.0, 70.0], [70.0, 100.0]],
+            },
+            GmmGaussian {
+                prob,
+                mean: array![40.0, 75.0],
+                covariance_matrix: array![[25.0, 0.0], [0.0, 25.0]],
+            },
+            GmmGaussian {
+                prob,
+                mean: array![10.0, 60.0],
+                covariance_matrix: array![[5.0, 0.0], [0.0, 100.0]],
+            },
+        ];
+
+        for (gaussian, expected) in gmm
+            .gaussians
+            .into_iter()
+            .zip(expected_gaussians.into_iter())
+        {
+            assert_aclose!(gaussian.prob, expected.prob, limit);
+            for (got, expected) in gaussian.mean.iter().zip(expected.mean.iter()) {
+                assert_aclose!(*got, *expected, limit);
+            }
+            for (got, expected) in gaussian
+                .covariance_matrix
+                .iter()
+                .zip(expected.covariance_matrix.iter())
+            {
+                assert_aclose!(*got, *expected, limit);
+            }
         }
     }
 }
