@@ -3,7 +3,7 @@ use clap::Parser;
 use input::MFCCSettings;
 use std::path::PathBuf;
 
-mod gmm;
+mod classifier;
 mod input;
 
 #[derive(Parser)]

@@ -1,18 +1,13 @@
 //! Modul pro práci s GMM (Gaussian mixture model).
 
-use std::{
-    f32::consts::PI,
-    iter::{Map, repeat_n},
-};
+use std::{f32::consts::PI, iter::repeat_n};
 
-use anyhow::{Context, Result, anyhow, bail};
-use ndarray::{
-    Array0, Array1, Array2, Array3, ArrayView1, ArrayView2, Axis, IntoNdProducer, ShapeBuilder, s,
-};
+use anyhow::{Context, Result};
+use ndarray::{Array1, Array2, ArrayView2, Axis};
 use ndarray_linalg::{Determinant, Inverse};
-use ndarray_stats::{CorrelationExt, SummaryStatisticsExt};
-use rand::{Rng, seq::IndexedRandom};
-use rand_distr::{Distribution, Normal, StandardNormal, num_traits::Inv};
+use ndarray_stats::CorrelationExt;
+use rand::Rng;
+use rand_distr::{StandardNormal, num_traits::Inv};
 
 #[derive(Clone)]
 struct GmmGaussian {
@@ -56,7 +51,7 @@ impl GmmGaussian {
 
 /// Struktura reprezentující generativní model, který modeluje data
 /// pomocí směsice Gaussovských rozložení. Data jsou N-dimenzionální vektory.
-struct Gmm {
+pub struct Gmm {
     dimensionality: usize,
     gaussians: Vec<GmmGaussian>,
 }
@@ -97,6 +92,18 @@ impl Gmm {
         Ok(gmm)
     }
 
+    /// Vrátí podmíněnou pravděpodobnost `P(x | params)`, tedy pravděpodobnost, že tento model
+    /// vygeneroval daná data při aktuálním nastavení parametrů.
+    pub fn get_prob(&self, data: ArrayView2<f32>) -> Array1<f32> {
+        let mut result = Array2::zeros((data.dim().0, self.gaussians.len()));
+
+        for (mut column, gaussian) in result.columns_mut().into_iter().zip(self.gaussians.iter()) {
+            column.assign(&gaussian.get_prob(data));
+        }
+
+        result.sum_axis(Axis(1))
+    }
+
     /// Spočítá pro model "responsibilities" - tj. jak moc jsou jednotlivé gaussovky
     /// zodpovědné za vysvětlení výskytu každého data.
     ///
@@ -110,7 +117,7 @@ impl Gmm {
     fn calculate_responsibilities(&self, training_data: ArrayView2<f32>) -> Array2<f32> {
         let data_len = training_data.dim().0;
 
-        // Pro každé dato a gaussovku spočítám pravděpodobnost, že daná gaussovka vygenerovala dané dato a zváhuju to pravděopdobností, výběru dané gaussovky
+        // Pro každé dato a gaussovku spočítám pravděpodobnost, že daná gaussovka vygenerovala dané dato a zváhuju to pravděopdobností, výběru dané gaussovky.
         let mut weighted_probs_from_gaussians = Array2::zeros((data_len, self.gaussians.len()));
         for (gaussian, mut column) in self
             .gaussians
@@ -230,6 +237,8 @@ mod tests {
 
     use super::*;
 
+    const PRECISION: f32 = 0.001;
+
     #[test]
     fn test_gmm_initialization() {
         let training_data = array![[1.0, 1.0], [2.0, 2.0], [3.0, 3.0],];
@@ -251,11 +260,11 @@ mod tests {
 
         let gmm = Gmm::train(training_data.view(), 3).unwrap();
         let prob = 1.0 / 0.3; // Všechny gussovky by měly mít stejný počet hodnot
-        let limit = 1.0;
+        let limit = PRECISION;
 
         let expected_gaussians = vec![
             GmmGaussian {
-                prob: 1.0 / 3.0,
+                prob,
                 mean: array![50.0, 40.0],
                 covariance_matrix: array![[100.0, 70.0], [70.0, 100.0]],
             },
@@ -288,5 +297,18 @@ mod tests {
                 assert_aclose!(*got, *expected, limit);
             }
         }
+    }
+
+    #[test]
+    fn get_prob_gaussian_test() {
+        let gaussian = GmmGaussian {
+            prob: 1.0,
+            mean: array![50.0, 40.0],
+            covariance_matrix: array![[100.0, 70.0], [70.0, 100.0]],
+        };
+        let expected_prob = 0.0022286149708619224;
+        let prob = gaussian.get_prob(array![[50.0, 40.0]].view());
+
+        assert_aclose!(prob[0], expected_prob, PRECISION);
     }
 }
