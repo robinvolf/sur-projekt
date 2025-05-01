@@ -3,7 +3,7 @@
 mod gmm;
 
 use gmm::{DEFAULT_NUM_CLUSTERS, Gmm};
-use ndarray::{Array2, ArrayView1, ArrayView2};
+use ndarray::{Array2, ArrayView2, Axis};
 
 /// Klasifikátor řečníka podle hlasu
 struct SoundClassifier {
@@ -43,19 +43,43 @@ impl SoundClassifier {
         SoundClassifier { classes }
     }
 
-    /// Klasifikace založená na maximální posteriorní pravděpodobnosti:
-    /// `P(C|x) = (p(x|C) * P(C))/p(x)`
+    /// Slouží ke klasifikaci dat pomocí modelu
+    /// Vstupní data `signal` jsou chápána jako zvukový signál zpracovaný pomocí `[crate::mfcc:mfcc]`.
+    /// Výstup je pole dvojic (název třídy, pravděpodobnost).
     ///
     /// Pozn. pokud vybíráme třídu s maximální posteriorní pravděpodobností,
     /// můžeme vynechat `p(x)`, je u všech tříd stejné.
-    pub fn classify(&self, data: ArrayView2<f32>) -> &str {
-        self.classes.iter().map(|class| {
-            let likelihood = class.model.get_prob(data);
-            let likelihod_times_apriori = likelihood * class.apriori_probability;
+    pub fn classify(&self, signal: ArrayView2<f32>) -> Vec<(&str, f32)> {
+        // likelihood * apriorní pravděpodobnos každé třídy a data
+        let mut probs_by_class = Array2::zeros((signal.dim().0, self.classes.len()));
+        for (mut column, class) in probs_by_class
+            .columns_mut()
+            .into_iter()
+            .zip(self.classes.iter())
+        {
+            let class_prob = class.model.get_prob(signal) * class.apriori_probability;
+            column.assign(&class_prob);
+        }
 
-            todo!()
-        });
+        let evidence = probs_by_class.sum_axis(Axis(1));
 
-        todo!();
+        // Posteriorní pravděpodobnosti každého okna signálu a třídy
+        let posterior_probabilities = probs_by_class
+            / &evidence
+                .broadcast((signal.dim().0, self.classes.len()))
+                .unwrap();
+
+        // Zprůměruje to pravděpodobnosti tříd přes všechna data - průměrná P třídy na celém signálu
+        let overall_signal_probability = posterior_probabilities.mean_axis(Axis(0)).unwrap();
+
+        // Přidání jména třídy
+        let output_vec = Vec::from_iter(
+            overall_signal_probability
+                .iter()
+                .zip(self.classes.iter())
+                .map(|(prob, class)| (class.name.as_str(), *prob)),
+        );
+
+        output_vec
     }
 }
