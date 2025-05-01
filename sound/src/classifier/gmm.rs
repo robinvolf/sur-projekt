@@ -9,6 +9,8 @@ use ndarray_stats::CorrelationExt;
 use rand::Rng;
 use rand_distr::{StandardNormal, num_traits::Inv};
 
+pub const DEFAULT_NUM_CLUSTERS: usize = 8;
+
 #[derive(Clone)]
 struct GmmGaussian {
     /// Pravděpodobnost výběru dané gaussovky v GMM
