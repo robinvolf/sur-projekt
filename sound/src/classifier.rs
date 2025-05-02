@@ -21,16 +21,22 @@ impl SoundClassifier {
     /// Natrénuje klasifikátor na trénovacích datech.
     /// Vezme iterátor, který iteruje `labeled_training_data` nad dvojicemi:
     /// (třída, data) a celkový počet trénovacích dat `data_len`.
-    pub fn train<'tr, I>(labeled_training_data: I, data_len: usize) -> SoundClassifier
+    pub fn train<'tr, I>(
+        labeled_training_data: I,
+        num_gaussians_for_each_class: usize,
+    ) -> SoundClassifier
     where
         I: IntoIterator<Item = (String, ArrayView2<'tr, f32>)>,
     {
-        let classes: Vec<Class> = labeled_training_data
+        let mut data_len = 0.0;
+        let mut classes: Vec<Class> = labeled_training_data
             .into_iter()
             .map(|(label, data)| {
                 let name = label;
-                let apriori_probability = data.dim().0 as f32 / data_len as f32;
-                let model = Gmm::train(data, DEFAULT_NUM_CLUSTERS).unwrap();
+                let apriori_probability = data.dim().0 as f32; // Zatím to není apriorní pravděpodobnost, je to jen počet dat v dané třídě
+                let model = Gmm::train(data, num_gaussians_for_each_class).unwrap();
+
+                data_len += apriori_probability;
 
                 Class {
                     name,
@@ -40,16 +46,21 @@ impl SoundClassifier {
             })
             .collect();
 
+        // Podělení délkou dat, abychom počet prvků třídy změnili na apriorní pravděpodobnost
+        classes
+            .iter_mut()
+            .for_each(|class| class.apriori_probability /= data_len);
+
         SoundClassifier { classes }
     }
 
-    /// Slouží ke klasifikaci dat pomocí modelu
-    /// Vstupní data `signal` jsou chápána jako zvukový signál zpracovaný pomocí `[crate::mfcc:mfcc]`.
-    /// Výstup je pole dvojic (název třídy, pravděpodobnost).
+    /// Slouží ke klasifikaci dat pomocí modelu. Provede "soft" klasifikaci. Vrátí
+    /// seznam dvojic třída - pravděpodobnost, jak moc si je model jistý, že signál patří
+    /// do dané třídy.
     ///
-    /// Pozn. pokud vybíráme třídu s maximální posteriorní pravděpodobností,
-    /// můžeme vynechat `p(x)`, je u všech tříd stejné.
-    pub fn classify(&self, signal: ArrayView2<f32>) -> Vec<(&str, f32)> {
+    /// Vstupní data `signal` jsou chápána jako zvukový signál zpracovaný pomocí [`wav_to_mfcc_windows()`](crate::input::wav_to_mfcc_windows).
+    /// Výstup je pole dvojic (název třídy, pravděpodobnost).
+    pub fn classify_soft(&self, signal: ArrayView2<f32>) -> Vec<(&str, f32)> {
         // likelihood * apriorní pravděpodobnos každé třídy a data
         let mut probs_by_class = Array2::zeros((signal.dim().0, self.classes.len()));
         for (mut column, class) in probs_by_class
@@ -81,5 +92,24 @@ impl SoundClassifier {
         );
 
         output_vec
+    }
+
+    /// Stejné jako [`classify_soft()`](Self::classify_soft) až na to, že provede tvrdou klasifikaci,
+    /// jednoduše vybere třídu s nejvyšší pravděpodobností a tu vrátí.
+    pub fn classify_hard(&self, signal: ArrayView2<f32>) -> &str {
+        let probs = self.classify_soft(signal);
+        let class_with_highest_prob = probs
+            .into_iter()
+            .reduce(|(best_name, best_prob), (new_name, new_prob)| {
+                if new_prob > best_prob {
+                    (new_name, new_prob)
+                } else {
+                    (best_name, best_prob)
+                }
+            })
+            .unwrap()
+            .0;
+
+        class_with_highest_prob
     }
 }
