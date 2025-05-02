@@ -11,7 +11,6 @@ ndarray = {version = "0.16.1", features = ["serde", "blas"]}
 ndarray-linalg = {version = "0.17.0", features = ["openblas-system"]}
 ndarray-stats = "0.6.0"
 ndrustfft = "0.5.0"
-plotters = {version = "0.3.7", default-features = false, features = ["svg_backend", "line_series", "point_series"]}
 rand = "0.9.1"
 rand_distr = "0.5.1"
 ron = "0.10.1"

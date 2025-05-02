@@ -30,6 +30,7 @@ impl SoundClassifier {
     pub fn train<'tr, I>(
         labeled_training_data: I,
         num_gaussians_for_each_class: usize,
+        em_iters: usize,
     ) -> SoundClassifier
     where
         I: IntoIterator<Item = (String, ArrayView2<'tr, f32>)>,
@@ -40,7 +41,7 @@ impl SoundClassifier {
             .map(|(label, data)| {
                 let name = label;
                 let apriori_probability = data.dim().0 as f32; // Zatím to není apriorní pravděpodobnost, je to jen počet dat v dané třídě
-                let model = Gmm::train(data, num_gaussians_for_each_class).unwrap();
+                let model = Gmm::train(data, num_gaussians_for_each_class, em_iters).unwrap();
 
                 data_len += apriori_probability;
 

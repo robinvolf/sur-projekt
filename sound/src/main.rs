@@ -41,6 +41,9 @@ enum Command {
         /// Počet gaussovek pro každou třídu v GMM
         #[arg(long, default_value_t = 5)]
         gaussians: usize,
+        /// Počet iterací EM algoritmu při trénování GMM
+        #[arg(long, default_value_t = 10)]
+        em_iters: usize,
     },
     /// Použije klasifikátor ke klasifikaci dodaných dat
     Classify {
@@ -71,6 +74,7 @@ fn main() -> Result<()> {
             dir,
             save_file,
             gaussians,
+            em_iters,
         } => {
             println!("Načítám trénovací data");
             let training_data = load_training_dir(&dir, &mfcc_settings)
@@ -82,6 +86,7 @@ fn main() -> Result<()> {
                     .iter()
                     .map(|(str, samp)| (str.clone(), samp.view())),
                 gaussians,
+                em_iters,
             );
 
             println!("Model natrénován, ukládám do {}", save_file.display());

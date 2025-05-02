@@ -59,15 +59,17 @@ pub struct Gmm {
 }
 
 impl Gmm {
-    const MAX_TRAINING_ITERS: usize = 10;
-
     /// Vytvoří nový GMM model z natrénovaných dat `training_data`,
     /// který modeluje data pomocí `num_gaussians` gaussovek.
     ///
     /// ### Trénování
     /// Pro trénování používá algoritmus
     /// [Expectation-Maximization](https://en.wikipedia.org/wiki/Expectation%E2%80%93maximization_algorithm).
-    pub fn train(training_data: ArrayView2<f32>, num_gaussians: usize) -> Result<Self> {
+    pub fn train(
+        training_data: ArrayView2<f32>,
+        num_gaussians: usize,
+        em_iters: usize,
+    ) -> Result<Self> {
         // Nejdříve inicializujeme parametry všech gaussovek na stejnou hodnotu spočítané z dat
         let mut gmm = Gmm::initialize_same_from_data(training_data, num_gaussians)?;
 
@@ -83,7 +85,7 @@ impl Gmm {
             covariance_matrix.mapv_inplace(|x| x + 0.001 * rng.sample::<f32, _>(StandardNormal));
         }
 
-        for _ in 0..Gmm::MAX_TRAINING_ITERS {
+        for _ in 0..em_iters {
             // Expectation
             let responsibilities = gmm.calculate_responsibilities(training_data);
 
@@ -260,7 +262,7 @@ mod tests {
     fn train_test() {
         let training_data = include!("gmm_test_data.rs");
 
-        let gmm = Gmm::train(training_data.view(), 3).unwrap();
+        let gmm = Gmm::train(training_data.view(), 3, 10).unwrap();
         let prob = 1.0 / 0.3; // Všechny gussovky by měly mít stejný počet hodnot
         let limit = PRECISION;
 
