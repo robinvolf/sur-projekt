@@ -8,10 +8,11 @@ use ndarray_linalg::{Determinant, Inverse};
 use ndarray_stats::CorrelationExt;
 use rand::Rng;
 use rand_distr::{StandardNormal, num_traits::Inv};
+use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_NUM_CLUSTERS: usize = 8;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GmmGaussian {
     /// Pravděpodobnost výběru dané gaussovky v GMM
     prob: f32,
@@ -53,6 +54,7 @@ impl GmmGaussian {
 
 /// Struktura reprezentující generativní model, který modeluje data
 /// pomocí směsice Gaussovských rozložení. Data jsou N-dimenzionální vektory.
+#[derive(Serialize, Deserialize)]
 pub struct Gmm {
     dimensionality: usize,
     gaussians: Vec<GmmGaussian>,

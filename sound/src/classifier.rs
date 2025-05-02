@@ -2,15 +2,21 @@
 
 mod gmm;
 
+use std::{fs, path::Path};
+
+use anyhow::Result;
 use gmm::{DEFAULT_NUM_CLUSTERS, Gmm};
 use ndarray::{Array2, ArrayView2, Axis};
+use serde::{Deserialize, Serialize};
 
 /// Klasifikátor řečníka podle hlasu
+#[derive(Serialize, Deserialize)]
 struct SoundClassifier {
     classes: Vec<Class>,
 }
 
 /// Třída klasifikátoru
+#[derive(Serialize, Deserialize)]
 struct Class {
     name: String,
     apriori_probability: f32,
@@ -111,5 +117,24 @@ impl SoundClassifier {
             .0;
 
         class_with_highest_prob
+    }
+
+    /// Uloží klasifikátor do souboru `file` pro pozdější načtení a použití.
+    pub fn save(&self, file: &Path) -> Result<()> {
+        let serialized_classifier =
+            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
+
+        fs::write(file, serialized_classifier)?;
+
+        Ok(())
+    }
+
+    /// Načte klasifikátor ze souboru `file`
+    pub fn load(file: &Path) -> Result<Self> {
+        let serialized_classifier = fs::read_to_string(file)?;
+
+        let classifier = ron::de::from_str(&serialized_classifier)?;
+
+        Ok(classifier)
     }
 }

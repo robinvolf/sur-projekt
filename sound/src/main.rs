@@ -27,6 +27,10 @@ struct Config {
     /// Maximální počet MFCC koeficientů, které budou vybrány
     #[arg(long, default_value_t = 20)]
     atmost_coeffs: usize,
+
+    /// Počet gaussovek pro každou třídu v GMM
+    #[arg(long, default_value_t = 5)]
+    gaussians: usize,
 }
 
 impl From<&Config> for MFCCSettings {
