@@ -11,7 +11,7 @@ mod mfcc;
 pub use mfcc::MFCCSettings;
 
 /// Vrátí matici MFCC příznaků oken signálu
-pub fn wav_to_mfcc_windows(path: &Path, mfcc_setting: &MFCCSettings) -> Result<Array2<f32>> {
+pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<Array2<f32>> {
     let mut reader =
         WavReader::open(path).context(format!("Nelze otevřít wav soubor {}", path.display()))?;
 
@@ -31,6 +31,6 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_setting: &MFCCSettings) -> Result<A
             .sample_rate
             .try_into()
             .context("Nelze reprezentovat vzorkovací frekvenci")?,
-        mfcc_setting,
+        mfcc_settings,
     ))
 }

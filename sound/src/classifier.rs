@@ -5,13 +5,13 @@ mod gmm;
 use std::{fs, path::Path};
 
 use anyhow::Result;
-use gmm::{DEFAULT_NUM_CLUSTERS, Gmm};
+use gmm::Gmm;
 use ndarray::{Array2, ArrayView2, Axis};
 use serde::{Deserialize, Serialize};
 
 /// Klasifikátor řečníka podle hlasu
 #[derive(Serialize, Deserialize)]
-struct SoundClassifier {
+pub struct SoundClassifier {
     classes: Vec<Class>,
 }
 

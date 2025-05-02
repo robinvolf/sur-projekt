@@ -10,8 +10,6 @@ use rand::Rng;
 use rand_distr::{StandardNormal, num_traits::Inv};
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_NUM_CLUSTERS: usize = 8;
-
 #[derive(Clone, Serialize, Deserialize)]
 struct GmmGaussian {
     /// Pravděpodobnost výběru dané gaussovky v GMM
