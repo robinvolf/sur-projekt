@@ -104,7 +104,12 @@ impl SoundClassifier {
     /// jednoduše vybere třídu s nejvyšší pravděpodobností a tu vrátí.
     pub fn classify_hard(&self, signal: ArrayView2<f32>) -> &str {
         let probs = self.classify_soft(signal);
-        let class_with_highest_prob = probs
+        SoundClassifier::classification_hard_from_soft(probs)
+    }
+
+    /// Spočítá tvrdou klasifikaci z měkké tím, že vybere třídu s nejvyšší pravděpodobností.
+    pub fn classification_hard_from_soft(soft_classification: Vec<(&str, f32)>) -> &str {
+        let class_with_highest_prob = soft_classification
             .into_iter()
             .reduce(|(best_name, best_prob), (new_name, new_prob)| {
                 if new_prob > best_prob {

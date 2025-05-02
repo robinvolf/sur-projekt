@@ -7,8 +7,8 @@ edition = "2024"
 anyhow = "1.0.98"
 clap = { version = "4.5.37", features = ["derive"] }
 hound = "3.5.1"
-ndarray = {version = "0.16.1", features = ["serde"]}
-ndarray-linalg = {version = "0.17.0"} #, default-features = false, features = ["openblas-static"]}
+ndarray = {version = "0.16.1", features = ["serde", "blas"]}
+ndarray-linalg = {version = "0.17.0", features = ["openblas-system"]}
 ndarray-stats = "0.6.0"
 ndrustfft = "0.5.0"
 plotters = {version = "0.3.7", default-features = false, features = ["svg_backend", "line_series", "point_series"]}

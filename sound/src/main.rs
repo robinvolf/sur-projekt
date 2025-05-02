@@ -1,9 +1,8 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use classifier::SoundClassifier;
-use input::{MFCCSettings, wav_to_mfcc_windows};
-use ndarray::{Array2, ArrayView2, Axis, concatenate};
-use std::path::{Path, PathBuf};
+use input::{MFCCSettings, classification_format, load_training_dir, wav_to_mfcc_windows};
+use std::path::PathBuf;
 
 mod classifier;
 mod input;
@@ -61,64 +60,6 @@ impl From<&Config> for MFCCSettings {
             atmost_coeffs: value.atmost_coeffs,
         }
     }
-}
-
-fn load_training_dir(
-    dir: &Path,
-    mfcc_settings: &MFCCSettings,
-) -> Result<Vec<(String, Array2<f32>)>> {
-    let mut labeled_data = Vec::new();
-
-    for class_dir in dir.read_dir()? {
-        let class_dir = class_dir?;
-
-        let class_name = class_dir.path().display().to_string();
-
-        // Kontrola, že `dir` obsahuje pouze složky
-        if !class_dir.path().is_dir() {
-            bail!("Ve složce trénovacích složek je soubor! {}", class_name);
-        }
-
-        let class_iter = class_dir.path().read_dir()?;
-
-        let mut samples = Vec::new();
-        for file in class_iter {
-            let file = file.context(format!("Nelze přečíst soubor v {class_name}"))?;
-            let mfcc_samples =
-                wav_to_mfcc_windows(&file.path(), mfcc_settings).context(format!(
-                    "Nelze zpracovat soubor {} na MFCC příznaky",
-                    file.path().display(),
-                ))?;
-            samples.push(mfcc_samples);
-        }
-        let samples_views: Vec<ArrayView2<f32>> = samples.iter().map(|s| s.view()).collect();
-
-        // Všechny okýnka jedné třídy poskládané ze všech nahrávek
-        let class_samples = concatenate(Axis(0), samples_views.as_slice()).context(format!(
-            "Nelze spojit všechna trénovací data třídy {}",
-            class_name
-        ))?;
-
-        labeled_data.push((class_name, class_samples));
-    }
-
-    Ok(labeled_data)
-}
-
-/// Převede výsledek měkké klasifikace na řetězec ve formátu spefikovaném v zadání:
-///
-/// ### Formát
-/// 33 polí na řádku oddělené mezerou.
-/// Tyto pole budou obsahovat popořadě následující údaje:
-///
-///  - jméno segmentu (jméno souboru BEZ přípony .wav či .png)
-///  - tvrdé rozhodnutí o třídě, kterým bude celé číslo s hodnotou od 1 do 31.
-///  - následujících 31 polí bude popořadě obsahovat číselná skóre odpovídající
-///    logaritmickým pravděpodobnostem jednotlivých tříd 1 až 31.
-///    (Pokud použijete klasifikátor jehož výstup se nedá interpretovat
-///    pravděpodobnostně, nastavte tato pole na hodnotu NaN.
-fn classification_format(file_name: &Path, decision: Vec<(&str, f32)>) -> String {
-    todo!()
 }
 
 fn main() -> Result<()> {
