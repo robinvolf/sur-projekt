@@ -218,4 +218,19 @@ where {
             .map(|class| class.model.count_nans_in_parameters())
             .sum()
     }
+
+    /// Zvaliduje model na dodané validační sadě, vrátí přesnost modelu.
+    pub fn valiadate(&self, validation_data: &[(String, Array2<f64>)]) -> f64 {
+        let correct_classifications: usize = validation_data
+            .iter()
+            .map(|(class, data)| {
+                let decision = self.classify_hard(data.view());
+                Into::<usize>::into(decision == class)
+            })
+            .sum();
+
+        let data_len = validation_data.len();
+
+        correct_classifications as f64 / data_len as f64
+    }
 }

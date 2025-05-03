@@ -37,7 +37,7 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<
     ))
 }
 
-/// Načte složku `dir` s trénovacími daty ve formátu:
+/// Načte složku `dir` s daty ve formátu:
 /// ```text
 /// dir
 /// ├ class_dir0
@@ -48,7 +48,7 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<
 ///   └ file.wav
 /// ```
 /// Pokud data nelze načíst, vrátí Error.
-pub fn load_training_dir(
+pub fn load_data_dir(
     dir: &Path,
     mfcc_settings: &MFCCSettings,
 ) -> Result<Vec<(String, Array2<f64>)>> {

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use classifier::SoundClassifier;
-use input::{MFCCSettings, classification_format, load_training_dir, wav_to_mfcc_windows};
+use input::{MFCCSettings, classification_format, load_data_dir, wav_to_mfcc_windows};
 use std::path::PathBuf;
 
 mod classifier;
@@ -67,6 +67,13 @@ enum Command {
         #[arg(long, default_value_t = 0.0)]
         regularization: f64,
     },
+    /// Použije dodaná validační data k validaci modelu, vypočte přesnost modelu
+    Validate {
+        /// Cesta k modelu
+        model: PathBuf,
+        /// Složka s validačními daty ve stejném formátu jako u trénování (viz help train)
+        validation_data: PathBuf,
+    },
 }
 
 impl From<&Config> for MFCCSettings {
@@ -93,7 +100,7 @@ fn main() -> Result<()> {
             regularization,
         } => {
             println!("Načítám trénovací data");
-            let training_data = load_training_dir(&dir, &mfcc_settings)
+            let training_data = load_data_dir(&dir, &mfcc_settings)
                 .context("Nepodařilo se načíst trénovací data")?;
 
             println!("Trénuji model...");
@@ -140,8 +147,10 @@ fn main() -> Result<()> {
             validation_data,
             regularization,
         } => {
-            let training_data = load_training_dir(&training_data, &mfcc_settings)?;
-            let validation_data = load_training_dir(&validation_data, &mfcc_settings)?;
+            let training_data = load_data_dir(&training_data, &mfcc_settings)
+                .context("Nepodařilo se načíst trénovací data")?;
+            let validation_data = load_data_dir(&validation_data, &mfcc_settings)
+                .context("Nepodařilo se načíst validační data")?;
 
             let model = SoundClassifier::train_tune(
                 training_data.as_slice(),
@@ -149,7 +158,21 @@ fn main() -> Result<()> {
                 regularization,
             );
 
-            model.save(&save_file)?;
+            model
+                .save(&save_file)
+                .context("Nepodařilo se uložit model")?;
+
+            Ok(())
+        }
+        Command::Validate {
+            model,
+            validation_data,
+        } => {
+            let model = SoundClassifier::load(&model).context("Nepodařilo se načíst model")?;
+            let validation_data = load_data_dir(&validation_data, &mfcc_settings)
+                .context("Nepodařilo se načíst validační data")?;
+            let accuracy = model.valiadate(validation_data.as_slice());
+            println!("Přesnost modelu je {accuracy}");
 
             Ok(())
         }
