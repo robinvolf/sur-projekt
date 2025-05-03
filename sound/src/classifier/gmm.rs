@@ -1,6 +1,6 @@
 //! Modul pro práci s GMM (Gaussian mixture model).
 
-use std::{f32::consts::PI, iter::repeat_n};
+use std::{f64::consts::PI, iter::repeat_n};
 
 use anyhow::{Context, Result};
 use ndarray::{Array1, Array2, ArrayView2, Axis};
@@ -13,18 +13,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 struct GmmGaussian {
     /// Pravděpodobnost výběru dané gaussovky v GMM
-    prob: f32,
+    prob: f64,
     /// Střední hodnota
-    mean: Array1<f32>,
+    mean: Array1<f64>,
     /// Kovarianční matice
-    covariance_matrix: Array2<f32>,
+    covariance_matrix: Array2<f64>,
 }
 
 impl GmmGaussian {
     /// Spočítá pravděpodobnost, že data pocházejí z této gaussovky v rámci GMM.
-    fn get_prob(&self, data: ArrayView2<f32>) -> Array1<f32> {
+    fn get_prob(&self, data: ArrayView2<f64>) -> Array1<f64> {
         // Při výpočtu pravděpodobnosti je tato část výpočtu vždy stejná
-        let multiplier = (2.0 * PI).powf(-(data.dim().1 as f32) / 2.0);
+        let multiplier = (2.0 * PI).powf(-(data.dim().1 as f64) / 2.0);
         let inv_cov_matrix = self
             .covariance_matrix
             .inv()
@@ -66,7 +66,7 @@ impl Gmm {
     /// Pro trénování používá algoritmus
     /// [Expectation-Maximization](https://en.wikipedia.org/wiki/Expectation%E2%80%93maximization_algorithm).
     pub fn train(
-        training_data: ArrayView2<f32>,
+        training_data: ArrayView2<f64>,
         num_gaussians: usize,
         em_iters: usize,
     ) -> Result<Self> {
@@ -81,8 +81,8 @@ impl Gmm {
             ..
         } in gmm.gaussians.iter_mut()
         {
-            mean.mapv_inplace(|x| x + 0.001 * rng.sample::<f32, _>(StandardNormal));
-            covariance_matrix.mapv_inplace(|x| x + 0.001 * rng.sample::<f32, _>(StandardNormal));
+            mean.mapv_inplace(|x| x + 0.001 * rng.sample::<f64, _>(StandardNormal));
+            covariance_matrix.mapv_inplace(|x| x + 0.001 * rng.sample::<f64, _>(StandardNormal));
         }
 
         for _ in 0..em_iters {
@@ -98,7 +98,7 @@ impl Gmm {
 
     /// Vrátí podmíněnou pravděpodobnost `P(x | params)`, tedy pravděpodobnost, že tento model
     /// vygeneroval daná data při aktuálním nastavení parametrů.
-    pub fn get_prob(&self, data: ArrayView2<f32>) -> Array1<f32> {
+    pub fn get_prob(&self, data: ArrayView2<f64>) -> Array1<f64> {
         let mut result = Array2::zeros((data.dim().0, self.gaussians.len()));
 
         for (mut column, gaussian) in result.columns_mut().into_iter().zip(self.gaussians.iter()) {
@@ -118,7 +118,7 @@ impl Gmm {
     /// [ ... ] D
     /// [ ... ]
     /// ```
-    fn calculate_responsibilities(&self, training_data: ArrayView2<f32>) -> Array2<f32> {
+    fn calculate_responsibilities(&self, training_data: ArrayView2<f64>) -> Array2<f64> {
         let data_len = training_data.dim().0;
 
         // Pro každé dato a gaussovku spočítám pravděpodobnost, že daná gaussovka vygenerovala dané dato a zváhuju to pravděopdobností, výběru dané gaussovky.
@@ -144,15 +144,14 @@ impl Gmm {
         responsibilities
     }
 
-    //
-    fn update_params(&mut self, responsibilities: ArrayView2<f32>, training_data: ArrayView2<f32>) {
+    fn update_params(&mut self, responsibilities: ArrayView2<f64>, training_data: ArrayView2<f64>) {
         // Váhy jednotlivých gaussovek, když vezmeme v úvahu všechna data (kolik proporčně dat náleží každé z gaussovek)
         let gauss_responsibilities = responsibilities.sum_axis(Axis(0));
 
         let data_len = training_data.dim().0;
 
         // Spočítáme nové pravděpodobnosti jednotlivých gaussovek
-        let new_gauss_probs = gauss_responsibilities / responsibilities.dim().0 as f32;
+        let new_gauss_probs = gauss_responsibilities / responsibilities.dim().0 as f64;
         for (gaussian, new_prob) in self.gaussians.iter_mut().zip(new_gauss_probs) {
             gaussian.prob = new_prob;
         }
@@ -200,7 +199,7 @@ impl Gmm {
     /// Inicializuje GMM tak, že každé gaussovce přiřadí stejný průměr
     /// a stejnou kovarianční matici.
     fn initialize_same_from_data(
-        training_data: ArrayView2<f32>,
+        training_data: ArrayView2<f64>,
         num_gaussians: usize,
     ) -> Result<Self> {
         let dimensionality = training_data.dim().1;
@@ -215,7 +214,7 @@ impl Gmm {
             .cov(1.0)
             .context("Nelze spočítat celkovou kovarianční matici")?;
 
-        let overall_prob = 1.0 / num_gaussians as f32;
+        let overall_prob = 1.0 / num_gaussians as f64;
 
         let gaussians = repeat_n(
             GmmGaussian {
@@ -241,7 +240,7 @@ mod tests {
 
     use super::*;
 
-    const PRECISION: f32 = 0.001;
+    const PRECISION: f64 = 0.001;
 
     #[test]
     fn test_gmm_initialization() {

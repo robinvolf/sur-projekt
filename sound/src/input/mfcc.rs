@@ -3,7 +3,7 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut2, s};
 use ndrustfft::{DctHandler, R2cFftHandler, nddct2, ndfft_r2c};
 use rand_distr::{Distribution, Normal};
-use std::{cmp::min, f32::consts::PI};
+use std::{cmp::min, f64::consts::PI};
 
 const MEL_FILTER_START_FREQ: usize = 20;
 const MEL_FILTER_END_FREQ: usize = 8000;
@@ -23,8 +23,8 @@ pub struct MFCCSettings {
 }
 
 /// Vrátí počet vzorků v okně, pokud vzorkujeme na frekvenci `frequency`.
-pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
-    let window_secs: f32 = window_size_ms as f32 / 1000.0;
+pub fn samples_in_window(frequency: f64, window_size_ms: u32) -> usize {
+    let window_secs: f64 = window_size_ms as f64 / 1000.0;
 
     let period = 1.0 / frequency;
 
@@ -48,10 +48,10 @@ pub fn samples_in_window(frequency: f32, window_size_ms: u32) -> usize {
 /// [ ... ]
 /// ```
 pub fn samples_into_window_matrix(
-    samples: &[f32],
+    samples: &[f64],
     samples_per_window: usize,
     overlap: usize,
-) -> Array2<f32> {
+) -> Array2<f64> {
     // Výpočet dimenzí matice oken
     let samples_in_window = samples_per_window;
 
@@ -91,10 +91,10 @@ pub fn samples_into_window_matrix(
 /// 6. Zlogaritmujeme
 /// 7. Spočteme kosinovou transformaci
 /// 8. Vybereme nejvýše `atmost_coeffs` koeficientů pro každé okno
-pub fn mfcc(samples: &[f32], sampling_frequency: usize, settings: &MFCCSettings) -> Array2<f32>
+pub fn mfcc(samples: &[f64], sampling_frequency: usize, settings: &MFCCSettings) -> Array2<f64>
 where
 {
-    let samples_in_window = samples_in_window(sampling_frequency as f32, settings.window_size_ms);
+    let samples_in_window = samples_in_window(sampling_frequency as f64, settings.window_size_ms);
 
     // Vneseme do vzorku Gaussovský šum kolem nuly, abychom se vyhli numerickým problémům při logaritmování
     let noise = Normal::new(0.0, 1.0)
@@ -102,7 +102,7 @@ where
         .sample_iter(rand::rng())
         .take(samples.len());
 
-    let samples: Vec<f32> = samples
+    let samples: Vec<f64> = samples
         .iter()
         .zip(noise)
         .map(|(sample, noise)| *sample + noise)
@@ -131,7 +131,7 @@ where
     let log_mel_coefs = mel_coefs.ln();
 
     // Diskrétní kosinová transformace pro jednotlivé řádky
-    let dct_handler = DctHandler::<f32>::new(log_mel_coefs.shape()[1]);
+    let dct_handler = DctHandler::<f64>::new(log_mel_coefs.shape()[1]);
     let mut mfcc_coeffs = Array2::zeros(log_mel_coefs.dim());
     nddct2(&log_mel_coefs, &mut mfcc_coeffs, &dct_handler, 1);
 
@@ -144,26 +144,26 @@ where
 }
 
 /// Zkonvertuje frekvenci `x` do Mel-scale
-fn mel_scale(x: f32) -> f32 {
+fn mel_scale(x: f64) -> f64 {
     1125.0 * (1.0 + x / 700.0).ln()
 }
 
 /// Zkonvertuje číslo `x` v Mel-scale na frekvenci
-fn mel_scale_inv(x: f32) -> f32 {
+fn mel_scale_inv(x: f64) -> f64 {
     700.0 * ((x / 1125.0).exp() - 1.0)
 }
 
 /// Aplikuje Mel-filtr banky na jednotlivá okna.
 /// Vytvoření Mel-filtr bank převzato z: <http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs>
 fn apply_mel_filter_bank(
-    windows: &Array2<f32>,
+    windows: &Array2<f64>,
     freq_start: usize,
     freq_end: usize,
     num_banks: usize,
     samples_rate: usize,
-) -> Array2<f32> {
-    let mel_start = mel_scale(freq_start as f32);
-    let mel_end = mel_scale(freq_end as f32);
+) -> Array2<f64> {
+    let mel_start = mel_scale(freq_start as f64);
+    let mel_end = mel_scale(freq_end as f64);
     let window_len = windows.dim().1;
 
     let mut filter_bank_points = Array1::linspace(mel_start, mel_end, num_banks + 2); // +2 protože ještě musíme započítat začátek a konec
@@ -173,11 +173,11 @@ fn apply_mel_filter_bank(
 
     // Převod na FFT bins
     filter_bank_points
-        .map_inplace(|x| *x = ((2 * window_len + 1) as f32 * *x / samples_rate as f32).floor());
+        .map_inplace(|x| *x = ((2 * window_len + 1) as f64 * *x / samples_rate as f64).floor());
 
     let banks = Array2::from_shape_fn((num_banks, window_len), |(m, k)| {
         let m = m + 1; // M-kem se jen indexuju do filter_bank_points, které jsou o jeden prvek na každou stranu větší, než výsledná banka filtrů
-        let k = k as f32;
+        let k = k as f64;
 
         if k < filter_bank_points[m - 1] || k > filter_bank_points[m + 1] {
             0.0
@@ -203,9 +203,9 @@ fn apply_mel_filter_bank(
 /// Aplikuje FFT na jednotlivá okna (řádky matice).
 /// Výstupní matice bude mít stejný počet oken, ale budou menší
 /// (konkrétně n/2 + 1), kvůli symetrii FFT při zpracování reálného signálu.
-fn fft_only_amplitudes(windows: &Array2<f32>) -> Array2<f32> {
+fn fft_only_amplitudes(windows: &Array2<f64>) -> Array2<f64> {
     let window_len = windows.dim().1;
-    let fft_handler = R2cFftHandler::<f32>::new(window_len);
+    let fft_handler = R2cFftHandler::<f64>::new(window_len);
 
     let mut fft_complex = Array2::zeros((windows.dim().0, window_len / 2 + 1));
 
@@ -224,18 +224,18 @@ fn fft_only_amplitudes(windows: &Array2<f32>) -> Array2<f32> {
 
 /// Aplikuje Tukeyho okno na matici vzorků. Toto okno utlumuje na začátku a na konci,
 /// ale prostřední část signálu, nechává nedotčenou.
-fn apply_tukey_window(mut windows: ArrayViewMut2<f32>) {
+fn apply_tukey_window(mut windows: ArrayViewMut2<f64>) {
     // Převzato z https://en.wikipedia.org/wiki/Window_function#Examples_of_window_functions
-    const ALPHA: f32 = 0.2;
-    const TWO_PI: f32 = 2.0 * PI;
+    const ALPHA: f64 = 0.2;
+    const TWO_PI: f64 = 2.0 * PI;
 
     let window_len = windows.dim().1;
 
     let tukey_window = Array1::from_iter((0..windows.dim().1).into_iter().map(|i| {
-        if (i as f32) < ALPHA * window_len as f32 / 2.0
-            || (i as f32) > window_len as f32 * (2.0 - ALPHA) / 2.0
+        if (i as f64) < ALPHA * window_len as f64 / 2.0
+            || (i as f64) > window_len as f64 * (2.0 - ALPHA) / 2.0
         {
-            0.5 * (1.0 - f32::cos((TWO_PI * i as f32) / (ALPHA * window_len as f32)))
+            0.5 * (1.0 - f64::cos((TWO_PI * i as f64) / (ALPHA * window_len as f64)))
         } else {
             1.0
         }
@@ -350,7 +350,7 @@ mod tests {
 
         let expected_windows = array![[0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]];
 
-        const TOLERANCE: f32 = 0.01;
+        const TOLERANCE: f64 = 0.01;
 
         // assert_eq!(windows, expected_windows) nefunguje, kvůli nepřesnosti floatů
         for (got, expected) in windows.into_iter().zip(expected_windows.into_iter()) {

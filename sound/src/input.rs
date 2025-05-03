@@ -13,7 +13,7 @@ pub use mfcc::MFCCSettings;
 use crate::classifier::SoundClassifier;
 
 /// Vrátí matici MFCC příznaků oken signálu
-pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<Array2<f32>> {
+pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<Array2<f64>> {
     let mut reader =
         WavReader::open(path).context(format!("Nelze otevřít wav soubor {}", path.display()))?;
 
@@ -21,7 +21,7 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<
         bail!("Vzorky souboru {} nejsou ve formáty i16", path.display());
     }
 
-    let samples: Vec<f32> = reader
+    let samples: Vec<f64> = reader
         .samples::<i16>()
         .map(|s| s.expect("Vzorky souboru by měly být ve formátu i16").into())
         .collect();
@@ -38,7 +38,7 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<
 }
 
 /// Načte složku `dir` s trénovacími daty ve formátu:
-/// ```
+/// ```text
 /// dir
 /// ├ class_dir0
 /// │ ├ file.wav
@@ -51,7 +51,7 @@ pub fn wav_to_mfcc_windows(path: &Path, mfcc_settings: &MFCCSettings) -> Result<
 pub fn load_training_dir(
     dir: &Path,
     mfcc_settings: &MFCCSettings,
-) -> Result<Vec<(String, Array2<f32>)>> {
+) -> Result<Vec<(String, Array2<f64>)>> {
     let mut labeled_data = Vec::new();
 
     for class_dir in dir.read_dir()? {
@@ -76,7 +76,7 @@ pub fn load_training_dir(
                 ))?;
             samples.push(mfcc_samples);
         }
-        let samples_views: Vec<ArrayView2<f32>> = samples.iter().map(|s| s.view()).collect();
+        let samples_views: Vec<ArrayView2<f64>> = samples.iter().map(|s| s.view()).collect();
 
         // Všechny okýnka jedné třídy poskládané ze všech nahrávek
         let class_samples = concatenate(Axis(0), samples_views.as_slice()).context(format!(
@@ -102,7 +102,7 @@ pub fn load_training_dir(
 ///    logaritmickým pravděpodobnostem jednotlivých tříd 1 až N.
 ///    (Pokud použijete klasifikátor jehož výstup se nedá interpretovat
 ///    pravděpodobnostně, nastavte tato pole na hodnotu NaN.
-pub fn classification_format(file_name: &Path, decision: Vec<(&str, f32)>) -> String {
+pub fn classification_format(file_name: &Path, decision: Vec<(&str, f64)>) -> String {
     let mut output = String::new();
     let segment_name = file_name.file_stem().unwrap().to_string_lossy();
     let hard_decision = SoundClassifier::classification_hard_from_soft(decision.clone());

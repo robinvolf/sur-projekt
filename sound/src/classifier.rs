@@ -19,7 +19,7 @@ pub struct SoundClassifier {
 #[derive(Serialize, Deserialize)]
 struct Class {
     name: String,
-    apriori_probability: f32,
+    apriori_probability: f64,
     model: Gmm,
 }
 
@@ -33,14 +33,14 @@ impl SoundClassifier {
         em_iters: usize,
     ) -> SoundClassifier
     where
-        I: IntoIterator<Item = (String, ArrayView2<'tr, f32>)>,
+        I: IntoIterator<Item = (String, ArrayView2<'tr, f64>)>,
     {
         let mut data_len = 0.0;
         let mut classes: Vec<Class> = labeled_training_data
             .into_iter()
             .map(|(label, data)| {
                 let name = label;
-                let apriori_probability = data.dim().0 as f32; // Zatím to není apriorní pravděpodobnost, je to jen počet dat v dané třídě
+                let apriori_probability = data.dim().0 as f64; // Zatím to není apriorní pravděpodobnost, je to jen počet dat v dané třídě
                 let model = Gmm::train(data, num_gaussians_for_each_class, em_iters).unwrap();
 
                 data_len += apriori_probability;
@@ -67,7 +67,7 @@ impl SoundClassifier {
     ///
     /// Vstupní data `signal` jsou chápána jako zvukový signál zpracovaný pomocí [`wav_to_mfcc_windows()`](crate::input::wav_to_mfcc_windows).
     /// Výstup je pole dvojic (název třídy, pravděpodobnost).
-    pub fn classify_soft(&self, signal: ArrayView2<f32>) -> Vec<(&str, f32)> {
+    pub fn classify_soft(&self, signal: ArrayView2<f64>) -> Vec<(&str, f64)> {
         // likelihood * apriorní pravděpodobnos každé třídy a data
         let mut probs_by_class = Array2::zeros((signal.dim().0, self.classes.len()));
         for (mut column, class) in probs_by_class
@@ -84,8 +84,9 @@ impl SoundClassifier {
         // Posteriorní pravděpodobnosti každého okna signálu a třídy
         let posterior_probabilities = probs_by_class
             / &evidence
-                .broadcast((signal.dim().0, self.classes.len()))
-                .unwrap();
+                .broadcast((self.classes.len(), signal.dim().0))
+                .unwrap()
+                .t();
 
         // Zprůměruje to pravděpodobnosti tříd přes všechna data - průměrná P třídy na celém signálu
         let overall_signal_probability = posterior_probabilities.mean_axis(Axis(0)).unwrap();
@@ -103,13 +104,13 @@ impl SoundClassifier {
 
     /// Stejné jako [`classify_soft()`](Self::classify_soft) až na to, že provede tvrdou klasifikaci,
     /// jednoduše vybere třídu s nejvyšší pravděpodobností a tu vrátí.
-    pub fn classify_hard(&self, signal: ArrayView2<f32>) -> &str {
+    pub fn classify_hard(&self, signal: ArrayView2<f64>) -> &str {
         let probs = self.classify_soft(signal);
         SoundClassifier::classification_hard_from_soft(probs)
     }
 
     /// Spočítá tvrdou klasifikaci z měkké tím, že vybere třídu s nejvyšší pravděpodobností.
-    pub fn classification_hard_from_soft(soft_classification: Vec<(&str, f32)>) -> &str {
+    pub fn classification_hard_from_soft(soft_classification: Vec<(&str, f64)>) -> &str {
         let class_with_highest_prob = soft_classification
             .into_iter()
             .reduce(|(best_name, best_prob), (new_name, new_prob)| {
