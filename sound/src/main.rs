@@ -55,6 +55,18 @@ enum Command {
         /// Jednotlivé .wav soubory ke klasifikaci
         recordings: Vec<PathBuf>,
     },
+    /// Použije dodaná data k natrénování a validační data k ladění hyperparametrů
+    TrainTune {
+        /// Soubor, kam bude klasifikátor uložen
+        save_file: PathBuf,
+        /// Složka s trénovacími daty ve stejném formátu jako u trénování (viz help train)
+        training_data: PathBuf,
+        /// Složka s validačními daty ve stejném formátu jako u trénovací sada
+        validation_data: PathBuf,
+        /// Síla regularizace při výpočtu kovarianční matice (přičítá násobek jednotkové matice)
+        #[arg(long, default_value_t = 0.0)]
+        regularization: f64,
+    },
 }
 
 impl From<&Config> for MFCCSettings {
@@ -86,9 +98,7 @@ fn main() -> Result<()> {
 
             println!("Trénuji model...");
             let model = SoundClassifier::train(
-                training_data
-                    .iter()
-                    .map(|(str, samp)| (str.clone(), samp.view())),
+                training_data.as_slice(),
                 gaussians,
                 em_iters,
                 regularization,
@@ -121,6 +131,25 @@ fn main() -> Result<()> {
                 let formatted_result = classification_format(&file, soft_decision);
                 println!("{}", formatted_result);
             }
+
+            Ok(())
+        }
+        Command::TrainTune {
+            save_file,
+            training_data,
+            validation_data,
+            regularization,
+        } => {
+            let training_data = load_training_dir(&training_data, &mfcc_settings)?;
+            let validation_data = load_training_dir(&validation_data, &mfcc_settings)?;
+
+            let model = SoundClassifier::train_tune(
+                training_data.as_slice(),
+                validation_data.as_slice(),
+                regularization,
+            );
+
+            model.save(&save_file)?;
 
             Ok(())
         }

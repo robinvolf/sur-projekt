@@ -7,10 +7,7 @@ use ndarray::{Array1, Array2, ArrayView2, Axis};
 use ndarray_linalg::{Determinant, Inverse};
 use ndarray_stats::CorrelationExt;
 use rand::Rng;
-use rand_distr::{
-    StandardNormal,
-    num_traits::{Inv, real::Real},
-};
+use rand_distr::{StandardNormal, num_traits::Inv};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
