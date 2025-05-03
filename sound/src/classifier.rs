@@ -31,6 +31,7 @@ impl SoundClassifier {
         labeled_training_data: I,
         num_gaussians_for_each_class: usize,
         em_iters: usize,
+        regularization: f64,
     ) -> SoundClassifier
     where
         I: IntoIterator<Item = (String, ArrayView2<'tr, f64>)>,
@@ -41,7 +42,9 @@ impl SoundClassifier {
             .map(|(label, data)| {
                 let name = label;
                 let apriori_probability = data.dim().0 as f64; // Zatím to není apriorní pravděpodobnost, je to jen počet dat v dané třídě
-                let model = Gmm::train(data, num_gaussians_for_each_class, em_iters).unwrap();
+                let model =
+                    Gmm::train(data, num_gaussians_for_each_class, em_iters, regularization)
+                        .unwrap();
 
                 data_len += apriori_probability;
 
@@ -143,5 +146,13 @@ impl SoundClassifier {
         let classifier = ron::de::from_str(&serialized_classifier)?;
 
         Ok(classifier)
+    }
+
+    /// Spočítá počet hodnot NaN v parametrech modelu
+    pub fn count_nans_in_parameters(&self) -> usize {
+        self.classes
+            .iter()
+            .map(|class| class.model.count_nans_in_parameters())
+            .sum()
     }
 }

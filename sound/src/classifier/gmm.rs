@@ -7,10 +7,13 @@ use ndarray::{Array1, Array2, ArrayView2, Axis};
 use ndarray_linalg::{Determinant, Inverse};
 use ndarray_stats::CorrelationExt;
 use rand::Rng;
-use rand_distr::{StandardNormal, num_traits::Inv};
+use rand_distr::{
+    StandardNormal,
+    num_traits::{Inv, real::Real},
+};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct GmmGaussian {
     /// Pravděpodobnost výběru dané gaussovky v GMM
     prob: f64,
@@ -24,7 +27,6 @@ impl GmmGaussian {
     /// Spočítá pravděpodobnost, že data pocházejí z této gaussovky v rámci GMM.
     fn get_prob(&self, data: ArrayView2<f64>) -> Array1<f64> {
         // Při výpočtu pravděpodobnosti je tato část výpočtu vždy stejná
-        let multiplier = (2.0 * PI).powf(-(data.dim().1 as f64) / 2.0);
         let inv_cov_matrix = self
             .covariance_matrix
             .inv()
@@ -33,14 +35,19 @@ impl GmmGaussian {
             .covariance_matrix
             .det()
             .expect("Nelze spočítat determinant kovarianční matice");
+        let dimensionality = data.dim().1 as i32;
 
         // Pole pravděpodobností z gaussovky
         let mut probs = Array1::from_iter(data.outer_iter().map(|features| {
-            let exponent = (&features - &self.mean)
-                .dot(&inv_cov_matrix)
-                .dot(&(&features - &self.mean));
+            let exponent = -0.5
+                * (&features - &self.mean)
+                    .dot(&inv_cov_matrix)
+                    .dot(&(&features - &self.mean));
 
-            multiplier * cov_matrix_det.inv().sqrt() * exponent.exp()
+            ((2.0 * PI).powi(dimensionality) * cov_matrix_det)
+                .sqrt()
+                .inv()
+                * exponent.exp()
         }));
 
         // Normalizace pravděpodobností výběru této gaussovky v rámci GMM
@@ -52,7 +59,7 @@ impl GmmGaussian {
 
 /// Struktura reprezentující generativní model, který modeluje data
 /// pomocí směsice Gaussovských rozložení. Data jsou N-dimenzionální vektory.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Gmm {
     dimensionality: usize,
     gaussians: Vec<GmmGaussian>,
@@ -69,6 +76,7 @@ impl Gmm {
         training_data: ArrayView2<f64>,
         num_gaussians: usize,
         em_iters: usize,
+        regularization: f64,
     ) -> Result<Self> {
         // Nejdříve inicializujeme parametry všech gaussovek na stejnou hodnotu spočítané z dat
         let mut gmm = Gmm::initialize_same_from_data(training_data, num_gaussians)?;
@@ -90,7 +98,7 @@ impl Gmm {
             let responsibilities = gmm.calculate_responsibilities(training_data);
 
             // Maximization
-            gmm.update_params(responsibilities.view(), training_data);
+            gmm.update_params(responsibilities.view(), training_data, regularization);
         }
 
         Ok(gmm)
@@ -134,48 +142,42 @@ impl Gmm {
 
         let resp_denom = weighted_probs_from_gaussians.sum_axis(Axis(1));
 
-        for mut column in weighted_probs_from_gaussians.columns_mut() {
-            column /= &resp_denom;
-        }
-
-        // Pro každé dato to říká, jak moc jsou jednotlivé gaussovky za to dato zodpovědné
-        let responsibilities = weighted_probs_from_gaussians;
+        let responsibilities = weighted_probs_from_gaussians
+            / resp_denom
+                .broadcast((self.gaussians.len(), data_len))
+                .unwrap()
+                .t();
 
         responsibilities
     }
 
-    fn update_params(&mut self, responsibilities: ArrayView2<f64>, training_data: ArrayView2<f64>) {
-        // Váhy jednotlivých gaussovek, když vezmeme v úvahu všechna data (kolik proporčně dat náleží každé z gaussovek)
-        let gauss_responsibilities = responsibilities.sum_axis(Axis(0));
-
-        let data_len = training_data.dim().0;
-
-        // Spočítáme nové pravděpodobnosti jednotlivých gaussovek
-        let new_gauss_probs = gauss_responsibilities / responsibilities.dim().0 as f64;
-        for (gaussian, new_prob) in self.gaussians.iter_mut().zip(new_gauss_probs) {
-            gaussian.prob = new_prob;
-        }
+    fn update_params(
+        &mut self,
+        responsibilities: ArrayView2<f64>,
+        training_data: ArrayView2<f64>,
+        regularization: f64,
+    ) {
+        let responsibilities_sum = responsibilities.sum();
 
         for (
             GmmGaussian {
-                prob: new_prob,
+                prob,
                 mean,
                 covariance_matrix,
             },
             responsibilities,
         ) in self.gaussians.iter_mut().zip(responsibilities.columns())
         {
-            let responsibilities_data_shape = responsibilities
-                .broadcast((self.dimensionality, data_len))
-                .unwrap()
-                .t()
-                .to_owned();
-
-            let new_mean =
-                (&training_data * &responsibilities_data_shape).sum_axis(Axis(0)) / *new_prob;
+            let new_mean = responsibilities.sum().inv()
+                * (&training_data
+                    * &responsibilities
+                        .broadcast((self.dimensionality, training_data.dim().0))
+                        .unwrap()
+                        .t())
+                    .sum_axis(Axis(0));
             mean.assign(&new_mean);
 
-            let mut new_cov = Array2::zeros((self.dimensionality, self.dimensionality));
+            let mut new_cov = Array2::eye(self.dimensionality) * regularization;
             for (features, responsibility) in training_data
                 .rows()
                 .into_iter()
@@ -193,6 +195,9 @@ impl Gmm {
                 new_cov += &(*responsibility * left * right);
             }
             covariance_matrix.assign(&new_cov);
+            covariance_matrix.mapv_inplace(|x| x / responsibilities.sum());
+
+            *prob = responsibilities.sum() / responsibilities_sum;
         }
     }
 
@@ -231,6 +236,24 @@ impl Gmm {
             gaussians,
         })
     }
+
+    /// Spočítá počet hodnot v Nan v parametrech
+    pub fn count_nans_in_parameters(&self) -> usize {
+        self.gaussians
+            .iter()
+            .map(|gaussian| {
+                usize::from(gaussian.prob.is_nan())
+                    + gaussian
+                        .mean
+                        .iter()
+                        .fold(0, |nans, x| nans + usize::from(x.is_nan()))
+                    + gaussian
+                        .covariance_matrix
+                        .iter()
+                        .fold(0, |nans, x| nans + usize::from(x.is_nan()))
+            })
+            .sum()
+    }
 }
 
 #[cfg(test)]
@@ -261,8 +284,8 @@ mod tests {
     fn train_test() {
         let training_data = include!("gmm_test_data.rs");
 
-        let gmm = Gmm::train(training_data.view(), 3, 10).unwrap();
-        let prob = 1.0 / 0.3; // Všechny gussovky by měly mít stejný počet hodnot
+        let gmm = Gmm::train(training_data.view(), 3, 100, 0.0).unwrap();
+        let prob = 1.0 / 3.0; // Všechny gussovky by měly mít stejný počet hodnot
         let limit = PRECISION;
 
         let expected_gaussians = vec![
@@ -283,6 +306,9 @@ mod tests {
             },
         ];
 
+        println!("{:#?}", gmm);
+
+        assert_eq!(gmm.count_nans_in_parameters(), 0);
         for (gaussian, expected) in gmm
             .gaussians
             .into_iter()

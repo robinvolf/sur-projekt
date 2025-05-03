@@ -57,7 +57,13 @@ pub fn load_training_dir(
     for class_dir in dir.read_dir()? {
         let class_dir = class_dir?;
 
-        let class_name = class_dir.path().display().to_string();
+        let class_name = class_dir
+            .path()
+            .file_name()
+            .context("Nevalidní jméno třídy")?
+            .to_str()
+            .context("Název třídy není validní Unicode")?
+            .to_owned();
 
         // Kontrola, že `dir` obsahuje pouze složky
         if !class_dir.path().is_dir() {
@@ -115,8 +121,6 @@ pub fn classification_format(file_name: &Path, decision: Vec<(&str, f64)>) -> St
         output.push(' ');
         output.push_str(&format!("{:.4}", prob.ln()));
     }
-
-    output.push('\n');
 
     output
 }

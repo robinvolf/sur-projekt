@@ -44,6 +44,9 @@ enum Command {
         /// Počet iterací EM algoritmu při trénování GMM
         #[arg(long, default_value_t = 10)]
         em_iters: usize,
+        /// Síla regularizace při výpočtu kovarianční matice (přičítá násobek jednotkové matice)
+        #[arg(long, default_value_t = 0.0)]
+        regularization: f64,
     },
     /// Použije klasifikátor ke klasifikaci dodaných dat
     Classify {
@@ -75,6 +78,7 @@ fn main() -> Result<()> {
             save_file,
             gaussians,
             em_iters,
+            regularization,
         } => {
             println!("Načítám trénovací data");
             let training_data = load_training_dir(&dir, &mfcc_settings)
@@ -87,7 +91,13 @@ fn main() -> Result<()> {
                     .map(|(str, samp)| (str.clone(), samp.view())),
                 gaussians,
                 em_iters,
+                regularization,
             );
+
+            let nans = model.count_nans_in_parameters();
+            if nans > 0 {
+                eprintln!("Detekováno {nans} hodnot NaN v parametrech modelu");
+            }
 
             println!("Model natrénován, ukládám do {}", save_file.display());
             model
