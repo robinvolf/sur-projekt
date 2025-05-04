@@ -10,6 +10,6 @@
   - Help k programu lze vypsat pomocí `cargo run --release -- --help`
 
 ### Jak natrénovat
-V kořenovém adresáři ZIP archivu spusťte `./download_and_extract_data.sh`, poté v adresáři s tímto souborem spusťte `./prepare_data.sh`, tyto dva skripty stáhnou a připraví data do vhodné adresářové struktury.
+V SRC složce ZIP archivu spusťte `./download_and_extract_data.sh`, poté v adresáři s tímto souborem spusťte `./prepare_data.sh`, tyto dva skripty stáhnou a připraví data do vhodné adresářové struktury.
 Poté již stačí spustit `cargo run --release -- train --gaussians X --em-iters X --regularization X training_data/ trained_model.ron`.
 Pro nápovědu, co znamenají jednotlivé parametry spusťte `cargo run --release -- help train`.
