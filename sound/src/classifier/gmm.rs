@@ -24,10 +24,20 @@ impl GmmGaussian {
     /// Spočítá pravděpodobnost, že data pocházejí z této gaussovky v rámci GMM.
     fn get_prob(&self, data: ArrayView2<f64>) -> Array1<f64> {
         // Při výpočtu pravděpodobnosti je tato část výpočtu vždy stejná
-        let inv_cov_matrix = self
-            .covariance_matrix
-            .inv()
-            .expect("Nelze spočítat inverzní kovarianční matici");
+        let mut inv_cov_matrix = self.covariance_matrix.inv();
+
+        // Pokud nelze spočítat inverzní kovarianční matici, postupně provádíme
+        // silnější regularizaci
+        let mut regularization_multiplier = 0.00001;
+        while let Err(_) = inv_cov_matrix {
+            let regularized_cov_matrix = &self.covariance_matrix
+                + (Array2::eye(self.covariance_matrix.dim().0) * regularization_multiplier);
+            inv_cov_matrix = regularized_cov_matrix.inv();
+            regularization_multiplier *= 10.0;
+        }
+
+        let inv_cov_matrix = inv_cov_matrix.unwrap();
+
         let cov_matrix_det = self
             .covariance_matrix
             .det()

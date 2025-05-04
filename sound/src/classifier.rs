@@ -36,7 +36,7 @@ impl SoundClassifier {
         regularization: f64,
     ) -> SoundClassifier {
         let gaussian_num_values: [usize; 20] = from_fn(|i| i + 1);
-        let gmm_iters_values: [usize; 4] = from_fn(|i| 10usize.pow(i as u32 + 1));
+        let gmm_iters_values: [usize; 3] = from_fn(|i| 10usize.pow(i as u32 + 1));
 
         let mut best_found_settings = (0.0, 0, 0);
         let mut model;
@@ -78,10 +78,6 @@ impl SoundClassifier {
         println!(
             "Nejlepší nalezené nastavení: Počet gaussovek = {}, Počet iterací = {}",
             best_found_settings.1, best_found_settings.2
-        );
-        println!(
-            "Průměrná pravděpodobnost správné třídy = {}",
-            best_found_settings.0 / validation_data.len() as f64
         );
 
         SoundClassifier::train(
